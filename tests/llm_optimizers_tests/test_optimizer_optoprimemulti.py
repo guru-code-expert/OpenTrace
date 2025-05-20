@@ -48,7 +48,12 @@ def test_call_llm_returns_list(default_optimizer):
     assert isinstance(results, list)
     assert results == ["resp1", "resp2"]
 
-@pytest.mark.parametrize("gen_tech", ["temperature_variation", "self_refinement", "iterative_alternatives", "multi_experts"])
+@pytest.mark.parametrize("gen_tech", [
+    "temperature_variation", 
+    "self_refinement", 
+    "iterative_alternatives", 
+    "multi_experts"]
+    )
 def test_generate_candidates_length(default_optimizer, gen_tech, capsys):
     opt = default_optimizer
     # monkeypatch call_llm for each call to return unique string
