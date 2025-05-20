@@ -11,6 +11,7 @@ from collections import Counter
 from opto.trace.propagators import GraphPropagator
 from opto.optimizers.optoprime import OptoPrime
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class OptoPrimeMulti(OptoPrime):
     def __init__(
@@ -82,6 +83,43 @@ class OptoPrimeMulti(OptoPrime):
         #     print("LLM responses:\n", responses)
 
         return responses
+
+    # ---------------------------------------------------------------------+
+    # Small helper that runs *many* call_llm invocations in parallel      |
+    # while preserving the original order of the results.                 |
+    # ---------------------------------------------------------------------+
+    def _parallel_call_llm(self, arg_dicts: List[Dict[str, Any]]) -> List[str]:
+        """
+        Run several `self.call_llm(**kwargs)` invocations concurrently.
+
+        * **arg_dicts** – a list where each element is the kwargs you would
+          normally pass to `self.call_llm`.
+        * The function returns **one flat list** with the first
+          message of every response, **in the same order** as `arg_dicts`.
+        """
+        # Pre-allocate result slots so that order is deterministic
+        out: List[Optional[str]] = [None] * len(arg_dicts)
+
+        # Use threads (cheap, works even if the OpenAI client is sync only)
+        with ThreadPoolExecutor(max_workers=len(arg_dicts)) as pool:
+            future_to_idx = {
+                pool.submit(self.call_llm, **kw): i
+                for i, kw in enumerate(arg_dicts)
+            }
+
+            for fut in as_completed(future_to_idx):
+                idx = future_to_idx[fut]
+                try:
+                    resp = fut.result()          # ← original API returns List[str]
+                    if resp:
+                        out[idx] = resp[0]       # keep only the first message
+                except Exception as e:
+                    if arg_dicts[idx].get("verbose"):
+                        print(f"[async-call-llm] worker {idx} failed: {e}")
+                    out[idx] = None
+
+        # Filter-out failed/empty slots while preserving order
+        return [x for x in out if x is not None]
 
     def generate_candidates(
         self,
@@ -219,27 +257,25 @@ class OptoPrimeMulti(OptoPrime):
             print(f"Generated experts: {experts}")
 
             # 2. For each expert, prepare a system prompt + user prompt
-            calls = []
-            #output_format = "JSON format {""reasoning"": <Your reasoning>,""answer"": <Your answer>, ""suggestion"": {<variable_1>: <suggested_value_1>,<variable_2>: <suggested_value_2>,...}"
+            # Build kwargs once …
+            arg_dicts = []
             for expert in experts[:num_responses]:
-                meta_prompt = f"You are a `{expert}`\nProvide your most optimized solution for the problem below.\n{self.output_format_prompt}"
-                response = self.call_llm(
-                    system_prompt=meta_prompt,
-                    user_prompt=f"PROBLEM:\n\n{user_prompt}",
-                    verbose=verbose,
-                    max_tokens=max_tokens,
-                    num_responses=1,
-                    temperature=0.0,
+                meta_prompt = (
+                    f"You are a `{expert}`\nProvide your most optimized "
+                    f"solution for the problem below.\n{self.output_format_prompt}"
                 )
-                
-                if response and len(response) > 0:
-                    text = response[0]
-                    sol = text.strip().removeprefix('<<<').removesuffix('>>>').strip()
+                arg_dicts.append(dict( system_prompt=meta_prompt, user_prompt=f"PROBLEM:\n\n{user_prompt}", verbose=verbose, max_tokens=max_tokens, num_responses=1, temperature=0.0,))
+            # … and fire them off in parallel, with proper exception handling
+            try:
+                parallel_results = self._parallel_call_llm(arg_dicts)
+                for raw in parallel_results:
+                    sol = raw.strip().removeprefix("<<<").removesuffix(">>>").strip()
                     candidates.append(sol)
-                else:
-                    generation_technique = "temperature_variation"
-                    candidates = []
-                    print(f"Error in multi_experts mode: {str(e)} – falling back to temperature variation")
+            except Exception as e:
+                if verbose:
+                    print(f"Error in multi_experts mode: {e} – falling back to temperature variation")
+                generation_technique = "temperature_variation"
+                candidates = []
 
         # Default to temperature variation
         if not candidates or generation_technique == "temperature_variation":
@@ -251,26 +287,10 @@ class OptoPrimeMulti(OptoPrime):
             if verbose:
                 print(f"Temperatures for responses: {temperatures}")
 
-            for temp in temperatures:
-                try:
-                    response = self.call_llm(
-                        system_prompt=system_prompt,
-                        user_prompt=user_prompt,
-                        verbose=verbose,
-                        max_tokens=max_tokens,
-                        num_responses=1,
-                        temperature=temp,
-                    )
-                    
-                    if response and len(response) > 0:
-                        candidates.append(response[0])
-                    else:
-                        if verbose:
-                            print(f"Empty response at temperature {temp}")
-                            
-                except Exception as e:
-                    if verbose:
-                        print(f"Error generating candidate at temperature {temp}: {str(e)}")
+            # Prepare one kwargs-dict per temperature …
+            arg_dicts = [ dict( system_prompt=system_prompt, user_prompt=user_prompt, verbose=verbose, max_tokens=max_tokens, num_responses=1, temperature=t,) for t in temperatures]
+            # Thenm call them concurrently
+            candidates.extend(self._parallel_call_llm(arg_dicts))
         
         if not candidates and verbose:
             print("Warning: Failed to generate any candidates")
