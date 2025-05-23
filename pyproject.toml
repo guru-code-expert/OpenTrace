@@ -11,7 +11,7 @@ authors = [
   {name = "Adith Swaminathan", email = "adith387@gmail.com"},
 ]
 license="MIT"
-license-file=["LICEN[CS]E*"]
+icense-files=["LICEN[CS]E*"]
 requires-python = ">= 3.9"
 dynamic = ["version", "dependencies", "description"]
 readme = "README.md"
