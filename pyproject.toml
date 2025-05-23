@@ -10,7 +10,9 @@ authors = [
   {name = "Allen Nie", email = "aimingnie@gmail.com"},
   {name = "Adith Swaminathan", email = "adith387@gmail.com"},
 ]
-dynamic = ["version", "license", "requires-python", "dependencies", "description"]
+license='MIT LICENSE
+requires-python = ">= 3.9"
+dynamic = ["version", "dependencies", "description"]
 readme = "README.md"
 keywords = ["trace", "opto", "AutoDiff"]
 classifiers = [
