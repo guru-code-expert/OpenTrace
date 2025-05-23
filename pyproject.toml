@@ -5,7 +5,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trace-opt"
-dynamic = ["version", "authors", "license", "requires-python", "dependencies", "description"]
+authors = [
+  {name = "Ching-An Cheng", email = "chinganc0@gmail.com"},
+  {name = "Allen Nie", email = "aimingnie@gmail.com"},
+  {name = "Adith Swaminathan", email = "adith387@gmail.com"},
+]
+dynamic = ["version", "license", "requires-python", "dependencies", "description"]
 readme = "README.md"
 keywords = ["trace", "opto", "AutoDiff"]
 classifiers = [
