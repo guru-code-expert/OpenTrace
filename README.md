@@ -38,6 +38,7 @@ git is unable to clone the repository.
 
 
 ## Updates
+- **2025.5.1** Ching-An Cheng gave a talk at 2nd Texas Colloquium on Distributed Learning (TL;DR)[https://sites.google.com/view/tldr-2025]
 - **2025.2.7** Trace was featured in the [G-Research NeurIPS highlight](https://www.gresearch.com/news/neurips-paper-reviews-2024-8/) by the Science Director Hugh Salimbeni.
 - **2024.12.10** Trace was demoed in person at NeurIPS 2024 Expo.
 - **2024.11.05** Ching-An Cheng gave a talk at UW Robotics Colloquium on Trace: [video](https://www.youtube.com/watch?v=T2g1Vo3u_9g).
@@ -345,6 +346,17 @@ If you use this code in your research please cite the following [publication](ht
 ```
 
 ## Papers / Projects that Use Trace
+
+[syftr: Efficient Search for Pareto-optimal Flows](https://github.com/datarobot/syftr)
+Automatic Agent Optimization Framework by [DataRobot](https://www.datarobot.com/)
+```
+@article{syftr2025,
+  title={syftr: Pareto-Optimal Generative AI},
+  author={Conway, Alexander and Dey, Debadeepta and Hackmann, Stefan and Hausknecht, Matthew and Schmidt, Michael and Steadman, Mark and Volynets, Nick},
+  booktitle={Proceedings of the International Conference on Automated Machine Learning (AutoML)},
+  year={2025},
+}
+```
 
 [Improving Parallel Program Performance Through DSL-Driven Code Generation with LLM Optimizers](https://arxiv.org/pdf/2410.15625)
 Work from Stanford, NVIDIA, Intel, Visa Research.
