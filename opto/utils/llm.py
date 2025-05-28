@@ -3,7 +3,6 @@ import os
 import time
 import json
 import os
-import openai
 import warnings
 
 try:
@@ -215,7 +214,8 @@ class CustomLLM(AbstractModel):
         super().__init__(factory, reset_freq)
 
     @classmethod
-    def _factory(cls, base_url: str, server_api_key: str) -> openai.OpenAI:
+    def _factory(cls, base_url: str, server_api_key: str):
+        import openai
         return openai.OpenAI(base_url=base_url, api_key=server_api_key)
 
     @property
