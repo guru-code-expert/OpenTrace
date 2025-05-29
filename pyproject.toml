@@ -11,7 +11,7 @@ authors = [
   {name = "Adith Swaminathan", email = "adith387@gmail.com"},
 ]
 license="MIT"
-icense-files=["LICEN[CS]E*"]
+license-files=["LICEN[CS]E*"]
 requires-python = ">= 3.9"
 dynamic = ["version", "dependencies", "description"]
 readme = "README.md"
@@ -19,7 +19,6 @@ keywords = ["trace", "opto", "AutoDiff"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3.9",
 ]
 
