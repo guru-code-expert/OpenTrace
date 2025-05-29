@@ -1,11 +1,7 @@
-from typing import Any, List, Dict, Union, Tuple, Optional
-import json, re
-from textwrap import dedent
+from typing import Any, List, Dict, Union, Optional
+import json
 from typing import List, Dict
-import numpy as np
-from difflib import SequenceMatcher
-from sklearn.cluster import AgglomerativeClustering
-from collections import Counter
+
 
 
 from opto.trace.propagators import GraphPropagator
