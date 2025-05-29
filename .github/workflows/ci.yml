@@ -14,6 +14,11 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+    
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.9"
 
     # 1) Restore any cached Ollama data (~2 GB)
     - name: Restore Ollama cache
@@ -63,7 +68,7 @@ jobs:
         echo "TRACE_LITELLM_MODEL=openai/phi4-mini:3.8b" >> $GITHUB_ENV
 
     # 8) Run all Trace unit tests
-    - name: Run unit tests of Optimizers
+    - name: Run unit tests
       run: pytest tests/unit_tests/
 
     # 9) Run basic tests for each optimizer (some will fail due to the small LLM model chosen for free GitHub CI)
