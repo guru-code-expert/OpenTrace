@@ -12,7 +12,7 @@ install_requires = [
     "graphviz>=0.20.1",
     "pytest",
     "litellm",
-    "black"
+    "black",
     "scikit-learn",
 ]
 
