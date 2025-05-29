@@ -13,6 +13,7 @@ install_requires = [
     "pytest",
     "litellm",
     "black"
+    "scikit-learn",
 ]
 
 setuptools.setup(
