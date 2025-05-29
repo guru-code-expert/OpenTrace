@@ -58,7 +58,7 @@ jobs:
     - name: Install Python deps
       run: |
         pip install -e .
-        pip install pytest datasets
+        pip install pytest datasets numpy
 
     # 7) Point LiteLLM/OpenAI to our local Ollama server
     - name: Configure LLM env
