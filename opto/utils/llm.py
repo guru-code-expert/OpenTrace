@@ -2,9 +2,7 @@ from typing import List, Tuple, Dict, Any, Callable, Union
 import os
 import time
 import json
-import litellm
 import os
-import openai
 import warnings
 
 try:
@@ -173,6 +171,7 @@ class LiteLLM(AbstractModel):
 
     @classmethod
     def _factory(cls, model_name: str):
+        import litellm
         if model_name.startswith('azure/'):  # azure model
             azure_token_provider_scope = os.environ.get('AZURE_TOKEN_PROVIDER_SCOPE', None)
             if azure_token_provider_scope is not None:
@@ -214,7 +213,8 @@ class CustomLLM(AbstractModel):
         super().__init__(factory, reset_freq)
 
     @classmethod
-    def _factory(cls, base_url: str, server_api_key: str) -> openai.OpenAI:
+    def _factory(cls, base_url: str, server_api_key: str):
+        import openai
         return openai.OpenAI(base_url=base_url, api_key=server_api_key)
 
     @property

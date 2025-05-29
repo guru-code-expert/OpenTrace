@@ -10,9 +10,7 @@ __version__ = version["__version__"]
 
 install_requires = [
     "graphviz>=0.20.1",
-    "scikit-learn",
     "pytest",
-    "xgboost",
     "litellm",
     "black"
 ]
@@ -21,8 +19,8 @@ setuptools.setup(
     name="trace-opt",
     version=__version__,
     author="Trace Team",
-    author_email="chinganc@microsoft.com",
-    url="https://github.com/microsoft/trace",
+    author_email="chinganc0@gmail.com, aimingnie@gmail.com, adith387@gmail",
+    url="https://github.com/AgentOpt/Trace",
     license='MIT LICENSE',
     description="An AutoDiff-like tool for training AI systems end-to-end with general feedback",
     long_description=open('README.md', encoding="utf8").read(),
