@@ -2,16 +2,13 @@ from typing import List, Tuple, Dict, Any, Callable, Union
 import os
 import time
 import json
-import litellm
 import os
-import openai
 import warnings
 
 try:
     import autogen  # We import autogen here to avoid the need of installing autogen
 except ImportError:
     pass
-
 
 class AbstractModel:
     """
@@ -179,6 +176,7 @@ class LiteLLM(AbstractModel):
 
     @classmethod
     def _factory(cls, model_name: str):
+        import litellm
         if model_name.startswith('azure/'):  # azure model
             azure_token_provider_scope = os.environ.get('AZURE_TOKEN_PROVIDER_SCOPE', None)
             if azure_token_provider_scope is not None:
@@ -220,7 +218,8 @@ class CustomLLM(AbstractModel):
         super().__init__(factory, reset_freq)
 
     @classmethod
-    def _factory(cls, base_url: str, server_api_key: str) -> openai.OpenAI:
+    def _factory(cls, base_url: str, server_api_key: str):
+        import openai
         return openai.OpenAI(base_url=base_url, api_key=server_api_key)
 
     @property
@@ -233,17 +232,30 @@ class CustomLLM(AbstractModel):
             config['model'] = self.model_name
         return self._model.chat.completions.create(**config)
 
+# Registry of available backends
+_LLM_REGISTRY = {
+    "LiteLLM": LiteLLM,
+    "AutoGen": AutoGenLLM,
+    "CustomLLM": CustomLLM,
+}
 
-
-TRACE_DEFAULT_LLM_BACKEND = os.getenv('TRACE_DEFAULT_LLM_BACKEND', 'LiteLLM')
-if TRACE_DEFAULT_LLM_BACKEND == 'AutoGen':
-    print("Using AutoGen as the default LLM backend.")
-    LLM = AutoGenLLM
-elif TRACE_DEFAULT_LLM_BACKEND == 'CustomLLM':
-    print("Using CustomLLM as the default LLM backend.")
-    LLM = CustomLLM
-elif TRACE_DEFAULT_LLM_BACKEND == 'LiteLLM':
-    print("Using LiteLLM as the default LLM backend.")
-    LLM = LiteLLM
-else:
-    raise ValueError(f"Unknown LLM backend: {TRACE_DEFAULT_LLM_BACKEND}")
+class LLM:
+    """
+    A unified entry point for all supported LLM backends.
+    
+    Usage:
+      # pick by env var (default: LiteLLM)
+      llm = LLM()
+      # or override explicitly
+      llm = LLM(backend="AutoGen", config_list=my_configs)
+    """
+    def __new__(cls, *args, backend: str = None, **kwargs):
+        # Decide which backend to use
+        name = backend or os.getenv("TRACE_DEFAULT_LLM_BACKEND", "LiteLLM")
+        try:
+            backend_cls = _LLM_REGISTRY[name]
+        except KeyError:
+            raise ValueError(f"Unknown LLM backend: {name}. "
+                             f"Valid options are: {list(_LLM_REGISTRY)}")
+        # Instantiate and return the chosen subclass
+        return backend_cls(*args, **kwargs)
