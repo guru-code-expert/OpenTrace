@@ -194,7 +194,7 @@ def main():
                        help='Number of training samples')
     parser.add_argument('--num_validate_samples', type=int, default=20,
                        help='Number of validation samples')
-    parser.add_argument('--num_test_samples', type=int, default=1,
+    parser.add_argument('--num_test_samples', type=int, default=20,
                        help='Number of test samples')
     
     # Model parameters
@@ -210,7 +210,7 @@ def main():
                        help='Number of training epochs')
     parser.add_argument('--batch_size', type=int, default=2,
                        help='Training batch size')
-    parser.add_argument('--num_threads', type=int, default=20,
+    parser.add_argument('--num_threads', type=int, default=50,
                        help='Number of threads for parallel processing')
     parser.add_argument('--eval_frequency', type=int, default=2,
                        help='How often to run evaluation')
@@ -220,11 +220,11 @@ def main():
                        help='Random seed for reproducibility')
     
     # Algorithm-specific parameters
-    parser.add_argument('--beam_width', type=int, default=2,
+    parser.add_argument('--beam_width', type=int, default=3,
                        help='Beam width for beam search algorithms')
     parser.add_argument('--num_proposals', type=int, default=2,
                        help='Number of proposals for beam search algorithms')
-    parser.add_argument('--max_depth', type=int, default=5,
+    parser.add_argument('--max_depth', type=int, default=20,
                        help='Maximum depth for beam search algorithms')
     parser.add_argument('--validation_dataset_size', type=int, default=20,
                        help='Size of validation dataset for beam search')
