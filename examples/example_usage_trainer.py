@@ -15,12 +15,13 @@ from opto.optimizers.utils import print_color
 from opto.trace.modules import Module
 from opto.trainer.algorithms.basic_algorithm import MinibatchAlgorithm, BasicSearchAlgorithm
 from opto.trainer.algorithms.beamsearch_algorithm import BeamsearchAlgorithm, BeamsearchHistoryAlgorithm
+from opto.trainer.algorithms.UCBsearch import UCBSearchAlgorithm, HybridUCB_LLM, UCBSearchFunctionApproximationAlgorithm
 from opto.trainer.guide import AutoGuide
 from opto.trainer.utils import DefaultLogger
 from opto.utils.llm import LLM, LiteLLM
 
 # Set default model
-os.environ["TRACE_LITELLM_MODEL"] = "vertex_ai/gemini-2.0-flash"
+# os.environ["TRACE_LITELLM_MODEL"] = "vertex_ai/gemini-2.0-flash"
 
 @trace.model
 class Learner(Module):
@@ -183,8 +184,8 @@ def main():
     parser = argparse.ArgumentParser(description='Train agent using various algorithms')
     
     # Algorithm parameters
-    parser.add_argument('--algorithm_type', type=str, default='beamsearchhistory',
-                       choices=['minibatch', 'basicsearch', 'beamsearch', 'beamsearchhistory'],
+    parser.add_argument('--algorithm_type', type=str, default='UCBSearchFunctionApproximationAlgorithm',
+                       choices=['minibatch', 'basicsearch', 'beamsearch', 'beamsearchhistory', 'UCBsearch', 'HybridUCB_LLM', 'UCBSearchFunctionApproximationAlgorithm'],
                        help='Type of algorithm to use')
     
     # Dataset parameters
@@ -197,7 +198,7 @@ def main():
     parser.add_argument('--num_test_samples', type=int, default=20,
                        help='Number of test samples')
     
-    # Model parameters
+    # LLM Model parameters
     parser.add_argument('--trace_model', type=str, default='vertex_ai/gemini-2.0-flash',
                        help='Model to use for trace operations')
     parser.add_argument('--student_model', type=str, default='vertex_ai/gemini-2.0-flash',
@@ -210,7 +211,7 @@ def main():
                        help='Number of training epochs')
     parser.add_argument('--batch_size', type=int, default=2,
                        help='Training batch size')
-    parser.add_argument('--num_threads', type=int, default=50,
+    parser.add_argument('--num_threads', type=int, default=10,
                        help='Number of threads for parallel processing')
     parser.add_argument('--eval_frequency', type=int, default=2,
                        help='How often to run evaluation')
@@ -232,6 +233,20 @@ def main():
                        help='Maximum history size for history-based algorithms')
     parser.add_argument('--num_basicsearch_proposals', type=int, default=2,
                        help='Number of proposals for basic search algorithm')
+    
+    # UCB algorithm-specific parameters
+    parser.add_argument('--max_buffer_size', type=int, default=10,
+                       help='Maximum buffer size for UCB algorithms')
+    parser.add_argument('--ucb_exploration_factor', type=float, default=1.0,
+                       help='UCB exploration factor')
+    parser.add_argument('--alpha', type=float, default=0.3,
+                       help='Alpha parameter for HybridUCB_LLM (probability of UCB vs LLM path)')
+    parser.add_argument('--num_search_iterations', type=int, default=100,
+                       help='Number of search iterations for UCB algorithms')
+    parser.add_argument('--train_batch_size_ucb', type=int, default=2,
+                       help='Training batch size for UCB algorithms')
+    parser.add_argument('--evaluation_batch_size', type=int, default=20,
+                       help='Evaluation batch size for UCB algorithms')
     
     args = parser.parse_args()
     
@@ -306,6 +321,36 @@ def main():
             logger=logger,
             num_threads=args.num_threads
         )
+    elif args.algorithm_type == 'UCBsearch':
+        algorithm = UCBSearchAlgorithm(
+            agent=agent,
+            optimizer=optimizer,
+            logger=logger,
+            num_threads=args.num_threads,
+            max_buffer_size=args.max_buffer_size,
+            ucb_exploration_factor=args.ucb_exploration_factor
+        )
+    elif args.algorithm_type == 'HybridUCB_LLM':
+        algorithm = HybridUCB_LLM(
+            agent=agent,
+            optimizer=optimizer,
+            logger=logger,
+            num_threads=args.num_threads,
+            max_buffer_size=args.max_buffer_size,
+            ucb_exploration_factor=args.ucb_exploration_factor,
+            alpha=args.alpha,
+            llm_model=args.trace_model
+        )
+    elif args.algorithm_type == 'UCBSearchFunctionApproximationAlgorithm':
+        algorithm = UCBSearchFunctionApproximationAlgorithm(
+            agent=agent,
+            optimizer=optimizer,
+            logger=logger,
+            num_threads=args.num_threads,
+            max_buffer_size=args.max_buffer_size,
+            ucb_exploration_factor=args.ucb_exploration_factor,
+            llm_model=args.trace_model
+        )
     else:
         raise ValueError(f"Unknown algorithm type: {args.algorithm_type}")
     
@@ -338,6 +383,13 @@ def main():
     elif args.algorithm_type == 'basicsearch':
         train_params["num_proposals"] = args.num_basicsearch_proposals
     
+    elif args.algorithm_type in ['UCBsearch', 'HybridUCB_LLM', 'UCBSearchFunctionApproximationAlgorithm']:
+        train_params.update({
+            "num_search_iterations": args.num_search_iterations,
+            "train_batch_size": args.train_batch_size_ucb,
+            "evaluation_batch_size": args.evaluation_batch_size
+        })
+    
     # Start training
     print(f"Training with {args.algorithm_type} algorithm...")
     start_time = time.time()
@@ -350,6 +402,21 @@ def main():
         print("\nBest validation scores at each depth:")
         for depth, score in enumerate(metrics['best_validation_scores']):
             print(f"  Depth {depth+1}: {score:.4f}")
+    
+    elif args.algorithm_type in ['UCBsearch', 'HybridUCB_LLM', 'UCBSearchFunctionApproximationAlgorithm']:
+        print("\nUCB Algorithm Metrics:")
+        if 'best_candidate_scores' in metrics and metrics['best_candidate_scores']:
+            print(f"  Best candidate scores over iterations: {len(metrics['best_candidate_scores'])} recorded")
+            print(f"  Final best candidate score: {metrics['best_candidate_scores'][-1]:.4f}")
+        if 'buffer_avg_score' in metrics and metrics['buffer_avg_score']:
+            print(f"  Final buffer average score: {metrics['buffer_avg_score'][-1]:.4f}")
+        if args.algorithm_type == 'HybridUCB_LLM':
+            if 'llm_generation_failures' in metrics:
+                print(f"  LLM generation failures: {metrics['llm_generation_failures']}")
+            if 'generation_path' in metrics:
+                ucb_count = metrics['generation_path'].count('ucb')
+                llm_count = metrics['generation_path'].count('llm')
+                print(f"  Generation methods used - UCB: {ucb_count}, LLM: {llm_count}")
     
     print(f"Final score: {final_score:.4f}")
     
