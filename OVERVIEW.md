@@ -1,32 +1,57 @@
 # Overview of Trace and Development Guide
 
-The library of Trace is designed to be a lightweight, modularized package to allow developers to easily try new ideas on generative optimization and integrate learning wtih their pipelines. 
+The Trace library is a lightweight, modular package designed to allow developers to experiment easily with generative optimization and integrate feedback-driven learning into their computational workflows.
+The library has four modules within the `opto` top-level namespace:
 
-Currently, the Trace library has three main modules collected under the `opto` top module. 
+1. `opto.trace` provides the infrastructure for converting executing Python code into symbolic directed acyclic graphs (DAGs). 
+It defines two tracing primitives:
+    - `trace.node`: Wraps Python objects, designating them as nodes within the computational graph.
+    - `@trace.bundle`: Decorates Python methods/functions, marking them as operators within the graph.
 
-1. `opto.trace` provides the infrastructure for tracing computational workflows. It defines two primitives `trace.node` and `@trace.bundle`. They can be applied to Python objects and methods, respectively, which define the root nodes and operators of the directed acyclic graph (DAG) of computation. They both have a `trainable` flag. When set `True`, the wrapped objects are viewed as *parameters* of the computational worflow. Users can use `trace.node` and `@trace.bundle` to declare the data and computation that they wish to trace and/or adapt, and we call the resulting workflow defined by these two primitives a *traced* workflow. When running a traced workflow, a DAG will be automatiically created by Trace as a data structure, which will later be sent to optimizers in `opto.optimizers`for updates (upon calling `node.backward` with soem feedback).
+Each primitive has a `trainable` flag. 
+When set to `True`, these marked nodes and bundles become the trainable *parameters* of the workflow.
+By using these primitives, developers can create a *traced workflow* represented as a DAG.
+This DAG structure is automatically constructed at runtime, capturing both computational dependencies and trainable parameters, ready for optimization.
 
-2. `opto.optimizers` has a collection of generative optimization algorithms, whose API is defined by an abstract class `Optimizer`. Think them like gradient algorithms. Their job is to propose a new version of the parameters (i.e. those set with `trainable=True`) when receiving a computational graph (DAG) and the feedback given to the computed output. Typically, these algorithms can be viewed as an LLM agent, which makes calls to LLM to analyze the computational graph and the feedback, and to propose updates. In Trace library, we provide implementation of several popular optimizers, such `OptoPrime`, `TextGrad`, and `OPRO`.
+2. `opto.optimizers` has an abstract class `Optimizer` that defines algorithms that take computation DAGs and associated feedback objects as input, and output values for the trainable parameters.
+These algorithms are analogous to gradient-based optimizers in PyTorch, but are typically implemented as generative optimization agents, leveraging LLMs to analyze feedback and propose parameter updates.
+We provide implementations of several generative optimizers:
+    - `OptoPrime`
+    - `TextGrad`
+    - `OPRO`
 
-3. `opto.trainers` are a collection of training algorithms (under the `AlgorithmBase` class) that use optimizers in `opto.optimizers` as subroutines to improve a given workflow following a feedback oracle constructed by datasets, interactive environments, etc. While `Optimizer` defines a low-level *optimization* API, `AlgorithmBase` defines a high-level *learning* API which standarizes the format of agent (by the `Module` class created by `@trace.model`), the data loader (by the `DataLoader` class), and the feedback oracle (by the `AutoGuide` class). With this common abstraction, we offer training algorithms, from the basic `MinibatchAlgorithm` which trains minibatches of samples to search algorithms like `BeamSearch`. The `AlgorithmBase` also handles logging of the training process. While there are overlapping between the functions of `Optimizer` and `AlgorithmBase`, the main distinction is that algorithms under `AlgorithmBase` are meta algorithms, as they should work for different optimizers in `opto.optimizers`.
+3. `opto.trainers` has the `AlgorithmBase` abstraction that orchestrates the overall training process.
+Trainers manage data handling, tracing control, feedback collection, optimizer invocation, and iterating/stopping. Specifically, a trainer:
+    - Controls data sampling (via `DataLoader`).
+    - Determines when DAGs are constructed and when feedback (e.g. via `AutoGuide`) is collected .
+    - Invokes `optimizers` for parameter updates, possibly repeatedly and manages the training loop.
+    - Logs training progress.
 
+Although `optimizers` handle lower-level optimization decisions, trainers under `AlgorithmBase` manage broader training logic and are designed to be compatible across various `optimizers`.
+We provide implementations of common trainers: `MinibatchAlgorithm`(basic minibatch training) and `BeamSearch` (example of search-based training).
 
-4. `opto.utils` has a collection of helper functions and backends, which are reusable for various applications. This includes, e.g., abstraction of LLMs, database, etc. Making use of all these utils would requie installing optional depedencies.
+4. `opto.utils` has a collection of reusable helper functions and backend utilities, including abstraction for:
+    - Large Language Models (LLMs)
+    - Databases
+    - Miscellaneous support tools.
 
+Note: Some utilities might require installing optional depedencies.
 
-In summary, `opto.trace` is the infrastructure, `opto.optimizers` are algorithms that process feedback and propose new parameter candidates, and `opto.trainers` are algorithms built on top of `opto.trace` and `opto.optimizers` to train learning agents.
+## Concise Summary of Abstractions
+  - `trace`: Infrastructure to construct symbolic computational DAGs
+  - `optimizers`: Receive DAG and feedback, output parameter values.
+  - `trainer`: Manages DAG construction, data sampling, feedback collection, optimizer invocation, and training workflow control.
 
-## Common Workflow of Using Trace
+## Common Workflow for Using Trace
 
-1. Use `trace.node` and `@trace.bundle` to define the traceable workflow and its trainable parameter. 
-2. Wrap the workflow as a `trace.Module` using `@trace.model`
-3. Create a dataloader using `DataLoader` and define the feedback oracle (an analogy of loss function) using `AutoGuide`. 
-4. Create a trainer from `opto.trainers` using optimizers from `opto.optimizers` and the above module, dataloader, and feedback oracle.
+1. Define a traceable workflow with `trace.node` and `@trace.bundle`, marking trainable parameters. 
+2. Wrap this workflow into a `trace.Module` with `@trace.model`.
+3. Define a dataloader (`DataLoader`) and feedback oracle (analogous to a loss function, using e.g. `AutoGuide`). 
+4. Instantiate a trainer from `opto.trainers`, specifying the optimizer from `opto.optimizers` alongside the defined module above, dataloader, and feedback oracle.
 5. Run the trainer. 
 
-
-## Common Workflow of Improving Trace
-- **Developing new optimization agent** Contribute to `trace.optimizers` and design new algorithms under `Optimizer`
-- **Developing new learning algorithms** Contribute to `trace.trainers` (and `trace.optimizers` when necessary). Design new algorithms under `AlgorithmBase`, new dataloader under `DataLoader`, or new feedback oracle under `AutoGuide`. 
-- **Improving infrastructure**  Propose updates to change `opto.trace` (e.g., to improve UI, add new tracing, etc.)
-- **Onboarding other utility tools** Add to `opto.utils` and update `setup.py` with optional requirements.
+## Guidelines for Improving and Extending Trace
+  - **New optimization agents**: Contribute to `opto.optimizers`, sub-class from the `Optimizer` abstraction.
+  - **New learning algorithms**: Contribute to `opto.trainers` (and optionally `opto.optimizers` if necessary). Design new algorithms sub-classing `AlgorithmBase`, new dataloader under `DataLoader`, or new feedback oracle under `AutoGuide`. 
+  - **Improving infrastructure**: Propose modifications to `opto.trace` to improve tracing capability, user experience, or additional functionality.
+  - **Onboarding other utility tools**: Add helpful tools to `opto.utils` and update `setup.py` accordingly for optional dependencies.
