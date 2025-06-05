@@ -12,15 +12,10 @@ async def basic(a=0):
 async def error(a=0):
     raise ValueError('error')
 
-
 @trace.bundle()
 async def basic2(a=0, t=1):
     await asyncio.sleep(t)
     return 'basic'
-
-
-
-
 
 def test_async():
     async def main():
