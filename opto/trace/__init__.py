@@ -31,4 +31,5 @@ __all__ = [
     "model",
     "apply_op",
     "propagators",
+    "utils"
 ]

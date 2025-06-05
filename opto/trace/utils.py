@@ -181,18 +181,18 @@ def escape_json_nested_quotes(json_str):
 
         if char == '"':
             # Check if this quote is around "name" or "value"
-            next_four = json_str[i + 1 : i + 5]
-            next_five = json_str[i + 1 : i + 6]
+            next_four = json_str[i + 1: i + 5]
+            next_five = json_str[i + 1: i + 6]
             is_key = next_four == "name" or next_five == "value"
 
             # Check if this is a structural quote (after : or before })
             prev_char = json_str[i - 1] if i > 0 else ""
             next_char = json_str[i + 1] if i < len(json_str) - 1 else ""
             is_value_boundary = (
-                prev_char == ":"
-                or (prev_char == " " and json_str[i - 2] == ":")
-                or next_char == "}"
-                or next_char == ","
+                    prev_char == ":"
+                    or (prev_char == " " and json_str[i - 2] == ":")
+                    or next_char == "}"
+                    or next_char == ","
             )
 
             if is_key or is_value_boundary:
@@ -248,6 +248,25 @@ def remove_non_ascii(json_txt):
     return cleaned
 
 
+def dedent(text: str):
+    """
+    A better dedent than dedent from textwrap module.
+    Remove leading and trailing whitespace for each line
+    For example:
+        ```
+        Line 1 has no leading space
+            Line 2 has two leading spaces
+        ```
+        The output will be :
+        ```
+        Line 1 has no leading space
+        Line 2 has two leading spaces
+        ```
+    This allows writing cleaner multiline prompts in the code.
+    """
+    return "\n".join([line.strip() for line in text.split("\n")])
+
+
 def test_json_quote_escaper():
     test_cases = [
         (
@@ -283,7 +302,7 @@ def test_json_quote_escaper():
     for i, (input_str, expected) in enumerate(test_cases, 1):
         result = escape_json_nested_quotes(input_str)
         assert (
-            result == expected
+                result == expected
         ), f"\nTest case {i} failed:\nInput:    {input_str}\nExpected: {expected}\nGot:      {result}"
 
     print("All tests passed!")

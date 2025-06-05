@@ -1,3 +1,4 @@
+import pytest
 from opto import trace
 from opto.optimizers import OptoPrime
 
@@ -36,3 +37,17 @@ def hidden():
     fun2.parameter._data
 
     fun2(1)
+
+def test_context_around_module():
+    class A:
+        @trace.bundle(trainable=True)
+        def func(self):
+            return
+
+    a = A()
+    a.func.parameter._data = """
+import time
+def func(self):
+    print(time.time())
+"""
+    a.func()
