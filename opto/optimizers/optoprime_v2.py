@@ -3,7 +3,7 @@ from textwrap import dedent, indent
 from opto.optimizers.optoprime import OptoPrime
 
 
-class OptoprimeBatchOpt(OptoPrime):
+class OptoPrimeV2(OptoPrime):
     # This is generic representation prompt, which just explains how to read the problem.
     representation_prompt = dedent(
         """
