@@ -478,11 +478,7 @@ class OptoPrime(Optimizer):
         for node in self.parameters:
             if node.trainable and node.py_name in suggestion:
                 try:
-                    from black import format_str, FileMode
                     formatted_suggestion = suggestion[node.py_name]
-                    # use black formatter for code reformatting
-                    if type(formatted_suggestion) == str and 'def' in formatted_suggestion:
-                        formatted_suggestion = format_str(formatted_suggestion, mode=FileMode())
                     update_dict[node] = type(node.data)(formatted_suggestion)
                 except (ValueError, KeyError) as e:
                     # catch error due to suggestion missing the key or wrong data type

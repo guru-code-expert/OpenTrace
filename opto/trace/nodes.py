@@ -2007,6 +2007,7 @@ class ParameterNode(Node[T]):
         trainable=True,
         description="[ParameterNode] This is a ParameterNode in a computational graph.",
         constraint=None,
+        projections=None,  # a list of Projection
         info=None,
     ) -> None:
         if description is None or description == "":
@@ -2027,6 +2028,15 @@ class ParameterNode(Node[T]):
             info=info,
         )
         self._dependencies["parameter"].add(self)
+        if projections is not None:
+            assert isinstance(
+                projections, list
+            ), "Projections must be a list of Projection objects."
+            from opto.trace.projection import Projection
+            assert all(
+                isinstance(p, Projection) for p in projections
+            ), "All projections must be instances of Projection."            
+            self._projections = projections
 
     def __str__(self) -> str:
         # str(node) allows us to look up in the feedback dictionary easily

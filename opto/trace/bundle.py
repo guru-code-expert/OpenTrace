@@ -39,6 +39,7 @@ def bundle(
     catch_execution_error=True,
     allow_external_dependencies=False,
     overwrite_python_recursion=False,
+    projections=None,
 ):
     """Wrap a function as a FunModule which returns node objects.
 
@@ -53,6 +54,7 @@ def bundle(
         catch_execution_error (bool, optional): Whether to catch exceptions during operator execution. Defaults to True.
         allow_external_dependencies (bool, optional): Whether to allow external dependencies. Defaults to False.
         overwrite_python_recursion (bool, optional): Whether to overwrite Python recursion behavior. Defaults to False.
+        projections (List[Projection], optional): List of projections to be used in updating trainable parameter. Defaults to None.
 
     Returns:
         FunModule: The wrapped function that returns node objects.
@@ -70,6 +72,7 @@ def bundle(
             allow_external_dependencies=allow_external_dependencies,
             overwrite_python_recursion=overwrite_python_recursion,
             _ldict=prev_f_locals,  # Get the locals of the calling function
+            projections=None,
         )
         return fun_module
 
@@ -124,6 +127,7 @@ class FunModule(Module):
         catch_execution_error=True,
         allow_external_dependencies=False,
         overwrite_python_recursion=False,
+        projections=None,
         _ldict=None,
     ):
 
@@ -183,10 +187,12 @@ class FunModule(Module):
                 signature = re.search(r"\s*(def.*:)", source).group(1)
             else:
                 signature = signature_sr.group(1)
+
             self.parameter = ParameterNode(
                 self.info["source"],
                 name="__code",
                 constraint="The code should start with:\n" + signature,
+                projections=projections,
             )
 
     @property
