@@ -1,7 +1,8 @@
 import warnings
 from opto import trace
 from opto.trace.modules import Module
-from opto.trainer.utils import async_run, DefaultLogger
+from opto.trainer.utils import async_run
+from opto.trainer.loggers import DefaultLogger
 import os
 
 
