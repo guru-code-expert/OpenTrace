@@ -4,7 +4,7 @@ from opto import trace
 from opto.utils.llm import LLM, LiteLLM
 from opto.optimizers.utils import print_color
 from opto.optimizers import OptoPrime
-from opto.trainer.algorithms.basic_algorithm import BatchedFeedback
+from opto.trainer.algorithms.basic_algorithms import BatchedFeedback
 from opto.trainer.guide import VerbalJudgeGuide
 from typing import Any
 
