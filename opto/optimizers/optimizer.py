@@ -54,9 +54,18 @@ class Optimizer(AbstractOptimizer):
 
     def step(self, bypassing=False, *args, **kwargs):
         update_dict = self.propose(*args, **kwargs)
+        self.project(update_dict)   
         if not bypassing:
             self.update(update_dict)
         return update_dict  # TODO add reasoning
+
+    def project(self, update_dict: Dict[ParameterNode, Any]):
+        """Project the update dictionary onto the feasible set."""
+        for p, d in update_dict.items():
+            if p.trainable:
+                for projection in p.projections:                                        
+                    d = projection.project(d)
+            update_dict[p] = d
 
     def propose(self, *args, **kwargs):
         """Propose the new data of the parameters based on the feedback."""

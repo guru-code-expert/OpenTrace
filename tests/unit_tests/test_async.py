@@ -28,7 +28,7 @@ def run(i):
     res2 = nested_subtract(res1, i)
     return res2
 
-def optional_run_async():
+def test_optional_run_async():
     scores = async_run([run] * N, [(i,) for i in range(N)])
 
     var_names = []
@@ -37,5 +37,3 @@ def optional_run_async():
 
     assert len(var_names) == len(set(var_names)), "Variable names shouldn't overlap in async solution"
 
-# ~17 seconds execution time
-optional_run_async()
