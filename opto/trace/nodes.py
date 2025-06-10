@@ -2036,7 +2036,7 @@ class ParameterNode(Node[T]):
             assert all(
                 isinstance(p, Projection) for p in projections
             ), "All projections must be instances of Projection."            
-            self._projections = projections
+            self.projections = projections
 
     def __str__(self) -> str:
         # str(node) allows us to look up in the feedback dictionary easily
