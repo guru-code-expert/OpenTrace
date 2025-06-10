@@ -2,16 +2,16 @@ import datasets
 import numpy as np
 from opto import trace
 from opto.utils.llm import LLM, LiteLLM
-from opto.optimizers.utils import print_color
 from opto.optimizers import OptoPrime
-from opto.trainer.algorithms.basic_algorithms import BatchedFeedback
+from opto.trainer.algorithms.basic_algorithms import MinibatchAlgorithm
+from opto.trainer.loggers import DefaultLogger 
 from opto.trainer.guide import VerbalJudgeGuide
 from typing import Any
 
 
 @trace.model
 class Learner:
-    # A basic LLM agent.
+    """ A basic LLM agent. """
 
     def __init__(self, system_prompt: str = "You're a helpful agent",
                  user_prompt_template: str = "Query: {message}",
@@ -22,9 +22,15 @@ class Learner:
 
     @trace.bundle()
     def model(self, system_prompt: str, user_prompt_template: str, message: str) -> str:
-        """ Call the LLM model. system_prompt specifies
-        the behavior of the agent. user prompt is the input to the agent, which
-        is formatted as user_prompt_template.format(message=message)."""
+        """Call the LLM model.
+
+        Args:
+            system_prompt: the system prompt to the agent. By tuning this prompt, we can control the behavior of the agent. For example, it can be used to provide instructions to the agent (such as how to reason about the problem, how to answer the question), or provide in-context examples of how to solve the problem.
+            user_prompt_template: the user prompt template to the agent. It is used as formatting the input to the agent as user_prompt_template.format(message=message).
+            message: the input to the agent. It can be a query, a task, a code, etc.
+        Returns:
+            The response from the agent.
+        """
 
         if '{message}' not in user_prompt_template:
             raise ValueError("user_prompt_template must contain '{message}'")
@@ -39,9 +45,9 @@ class Learner:
         """ Forward pass of the agent. """
         return self.model(self.system_prompt, self.user_prompt_template, message)
 
-class Logger:
-    def log(self, *messages, color=None, **kwargs):
-        print_color(messages, color=color)
+
+Guide = VerbalJudgeGuide
+Logger = DefaultLogger
 
 
 def main():
@@ -49,32 +55,35 @@ def main():
     seed = 42
     num_epochs = 1
     batch_size = 1
-    eval_frequency = 1
-    teacher_model = "gpt-4o-mini" #"gpt-4o-mini_2024-07-18"
-    student_model = "gpt-35-turbo_1106"
+    eval_frequency = -1
+    teacher_model = None
+    student_model = None
 
     np.random.seed(seed)
 
-    train_dataset = datasets.load_dataset('openai/gsm8k', 'main')['train'][
-                    :10]  # NOTE for now, we train on a smaller portion
+    # In this example, we use the GSM8K dataset, which is a dataset of math word problems.
+    # We will look the training error of the agent on a small portion of this dataset.
+    train_dataset = datasets.load_dataset('openai/gsm8k', 'main')['train'][:10]
     train_dataset = dict(inputs=train_dataset['question'], infos=train_dataset['answer'])
-    test_dataset = train_dataset  # NOTE for now, we just look at training error
+    test_dataset = train_dataset
 
-    agent = Learner(llm=LiteLLM(model="gpt-3.5-turbo"))
+    agent = Learner(llm=LLM(student_model))
+    guide = Guide(model=teacher_model)
+    optimizer = OptoPrime(agent.parameters())
 
-    guide = VerbalJudgeGuide(model=teacher_model)
-
-    alg = BatchedFeedback(agent=agent,
-                          optimizer=OptoPrime(agent.parameters()),
-                          logger=Logger())
-
+    alg = MinibatchAlgorithm(
+            agent=agent,
+            optimizer=optimizer,
+            logger=Logger())
+    
     alg.train(guide,
               train_dataset,
               num_epochs=num_epochs,
               batch_size=batch_size,
               eval_frequency=eval_frequency,
               test_dataset=test_dataset,
-              num_threads=3)
+              num_threads=3,
+              verbose=True,)
 
 
 if __name__ == "__main__":
