@@ -2032,7 +2032,7 @@ class ParameterNode(Node[T]):
             assert isinstance(
                 projections, list
             ), "Projections must be a list of Projection objects."
-            from opto.trace.projection import Projection
+            from opto.trace.projections import Projection
             assert all(
                 isinstance(p, Projection) for p in projections
             ), "All projections must be instances of Projection."            
