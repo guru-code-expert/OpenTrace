@@ -57,8 +57,9 @@ def main():
     batch_size = 1
     eval_frequency = -1
     verbose = True
-    teacher_model = None  # use default mode
-    student_model = None  # use default mode
+    teacher_model = None  # use default model
+    student_model = None  # use default model
+    optimizer_model = None  # use default model
 
     np.random.seed(seed)
 
@@ -69,8 +70,8 @@ def main():
     test_dataset = train_dataset
 
     agent = Learner(llm=LLM(student_model))
-    guide = Guide(model=teacher_model)
-    optimizer = OptoPrime(agent.parameters())
+    guide = Guide(model=LLM(teacher_model))
+    optimizer = OptoPrime(agent.parameters(), llm=LiteLLM(optimizer_model))
     logger = Logger(verbose=verbose)
              # set use_json_object_format=False if LLM does not support JSON object format
 
