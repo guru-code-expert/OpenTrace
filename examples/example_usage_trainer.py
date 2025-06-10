@@ -13,11 +13,11 @@ from opto import trace
 from opto.optimizers import OptoPrime
 from opto.optimizers.utils import print_color
 from opto.trace.modules import Module
-from opto.trainer.algorithms.basic_algorithm import MinibatchAlgorithm, BasicSearchAlgorithm
+from opto.trainer.algorithms.basic_algorithms import MinibatchAlgorithm, BasicSearchAlgorithm
 from opto.trainer.algorithms.beamsearch_algorithm import BeamsearchAlgorithm, BeamsearchHistoryAlgorithm
 from opto.trainer.algorithms.UCBsearch import UCBSearchAlgorithm, HybridUCB_LLM, UCBSearchFunctionApproximationAlgorithm
 from opto.trainer.guide import AutoGuide
-from opto.trainer.utils import DefaultLogger
+from opto.trainer.loggers import DefaultLogger
 from opto.utils.llm import LLM, LiteLLM
 
 # Set default model

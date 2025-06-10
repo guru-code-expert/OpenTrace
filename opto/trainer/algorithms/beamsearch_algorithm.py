@@ -3,7 +3,7 @@ import copy
 from typing import Union, List, Tuple, Dict, Any, Optional
 from opto.trainer.utils import async_run
 from opto.optimizers.utils import print_color
-from opto.trainer.algorithms.basic_algorithm import MinibatchAlgorithm, evaluate, batchify
+from opto.trainer.algorithms.basic_algorithms import MinibatchAlgorithm, evaluate, batchify
 
 
 class BeamsearchAlgorithm(MinibatchAlgorithm):

@@ -11,7 +11,7 @@ import random # Added for alpha probability
 from opto import trace
 from opto.trainer.utils import async_run # Assuming print_color is in utils
 from opto.optimizers.utils import print_color
-from opto.trainer.algorithms.basic_algorithm import MinibatchAlgorithm, evaluate, batchify # evaluate and batchify might be useful
+from opto.trainer.algorithms.basic_algorithms import MinibatchAlgorithm, evaluate, batchify # evaluate and batchify might be useful
 from opto.utils.llm import LiteLLM # For the selector LLM
 
 from opto.trace.nodes import ParameterNode
