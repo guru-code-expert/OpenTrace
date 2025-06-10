@@ -14,7 +14,8 @@ install_requires = [
     "litellm",
     "black",
     "scikit-learn",
-    "tensorboardX"
+    "tensorboardX",
+    "tensorboard"
 ]
     
 setuptools.setup(

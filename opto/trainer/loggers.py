@@ -2,6 +2,11 @@
 
 class BaseLogger:
 
+    def __init__(self, log_dir='./logs', **kwargs):
+        """Initialize the logger. This method can be overridden by subclasses."""
+        self.log_dir = log_dir
+        pass
+
     def log(self, name, data, step, **kwargs):
         """Log a message with the given name and data at the specified step.
         
@@ -41,10 +46,12 @@ class ConsoleLogger(BaseLogger):
         print(f"[Step {step}] {start_color}{name}: {data}{end_color}")
 
 
-class TensorboardLogger(BaseLogger):
+class TensorboardLogger(ConsoleLogger):
     """A logger that writes metrics to TensorBoard."""
     
-    def __init__(self, log_dir):
+    def __init__(self, log_dir='./logs', verbose=True, **kwargs):
+        super().__init__(log_dir, **kwargs)
+        self.verbose = verbose
         # Late import to avoid dependency issues
         try:             
             from tensorboardX import SummaryWriter
@@ -52,7 +59,7 @@ class TensorboardLogger(BaseLogger):
             # try importing from torch.utils.tensorboard if tensorboardX is not available
             from torch.utils.tensorboard import SummaryWriter
 
-        self.writer = SummaryWriter(log_dir)
+        self.writer = SummaryWriter(self.log_dir)
 
     def log(self, name, data, step, **kwargs):
         """Log a message to TensorBoard.
@@ -63,7 +70,14 @@ class TensorboardLogger(BaseLogger):
             step: Current step/iteration
             **kwargs: Additional arguments (not used here)
         """
-        self.writer.add_scalar(name, data, step)
+        if self.verbose:
+            super().log(name, data, step, **kwargs)
+        if isinstance(data, str):
+            # If data is a string, log it as text
+            self.writer.add_text(name, data, step)
+        else:
+            # Otherwise, log it as a scalar
+            self.writer.add_scalar(name, data, step)
 
 # TODO add wandb logger
 

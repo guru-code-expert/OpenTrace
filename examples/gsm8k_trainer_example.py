@@ -4,7 +4,7 @@ from opto import trace
 from opto.utils.llm import LLM, LiteLLM
 from opto.optimizers import OptoPrime
 from opto.trainer.algorithms.basic_algorithms import MinibatchAlgorithm
-from opto.trainer.loggers import DefaultLogger 
+from opto.trainer.loggers import DefaultLogger, TensorboardLogger
 from opto.trainer.guide import VerbalJudgeGuide
 from typing import Any
 
@@ -47,7 +47,7 @@ class Learner:
 
 
 Guide = VerbalJudgeGuide
-Logger = DefaultLogger
+Logger = TensorboardLogger
 
 
 def main():
@@ -56,8 +56,9 @@ def main():
     num_epochs = 1
     batch_size = 1
     eval_frequency = -1
-    teacher_model = None
-    student_model = None
+    verbose = True
+    teacher_model = None  # use default mode
+    student_model = None  # use default mode
 
     np.random.seed(seed)
 
@@ -70,11 +71,13 @@ def main():
     agent = Learner(llm=LLM(student_model))
     guide = Guide(model=teacher_model)
     optimizer = OptoPrime(agent.parameters())
+    logger = Logger(verbose=verbose)
+             # set use_json_object_format=False if LLM does not support JSON object format
 
     alg = MinibatchAlgorithm(
             agent=agent,
             optimizer=optimizer,
-            logger=Logger())
+            logger=logger)
     
     alg.train(guide,
               train_dataset,
@@ -83,7 +86,7 @@ def main():
               eval_frequency=eval_frequency,
               test_dataset=test_dataset,
               num_threads=3,
-              verbose=True,)
+              verbose='output' if verbose else False)
 
 
 if __name__ == "__main__":
