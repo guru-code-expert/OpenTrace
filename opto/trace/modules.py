@@ -64,6 +64,21 @@ def model(cls):
                 if i < len(all_members) - 1:
                     trace_model_body += "\n"  # only one newline between members
 
+            # Replace node initializations with their current values
+            # WARNING: there might be corner cases that this static analysis does not cover
+            import re
+            node_pattern = r'self\.(\w+)\s*=\s*node\([^)]*\)'
+            
+            def replace_node(match):
+                attr_name = match.group(1)
+                if hasattr(self, attr_name):
+                    attr = getattr(self, attr_name)
+                    if hasattr(attr, 'data'):
+                        return f"self.{attr_name} = {attr.data}"
+                return match.group(0)  # Return original if replacement not possible
+            
+            trace_model_body = re.sub(node_pattern, replace_node, trace_model_body)
+
             if projection is not None:
                 trace_model_body = projection.project(trace_model_body)
 
