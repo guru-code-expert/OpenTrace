@@ -41,7 +41,10 @@ def model(cls):
                 elif name.startswith('__'):
                     # For dunder methods, check if they were overridden
                     try:
-                        if hasattr(member, '__qualname__') and member.__qualname__.split('.')[0] == cls.__name__:
+                        print(cls.__name__, "<>", member.__qualname__)
+                        # MixedClass <> test_model_dump_mixed_trainable.<locals>.MixedClass.__init__
+                        # if we wrap it inside a function, the qualname is different than when we dont
+                        if hasattr(member, '__qualname__') and cls.__name__ in member.__qualname__:
                             filtered_members.append((name, member))
                     except (AttributeError, TypeError):
                         # Skip if we can't determine if it was overridden
@@ -49,9 +52,13 @@ def model(cls):
 
             # Process each member
             for i, (name, member) in enumerate(filtered_members):
+                print(name, member)
                 if 'FunModule' in str(member):
                     # Handle methods
-                    source = member.parameter.data
+                    if member.parameter is not None:
+                        source = member.parameter.data
+                    else:
+                        source = member.info['source']
                     source = textwrap.dedent(source)
                     indented = textwrap.indent(source, "    ")
                     trace_model_body += indented

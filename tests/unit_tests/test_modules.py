@@ -249,3 +249,92 @@ def test_model_dump_with_projection():
         if os.path.exists(temp_file):
             os.remove(temp_file)
 
+@model
+class NonTrainableClass:
+    def __init__(self):
+        super().__init__()
+        self._param = node(1, trainable=False)
+        self._param2 = node(2, trainable=False)
+        self.regular_attr = "test"
+
+    @bundle(trainable=False)
+    def non_trainable_method(self, x):
+        return x
+
+    @bundle(trainable=False)
+    def another_non_trainable(self, y):
+        return y + 1
+
+def test_model_dump_non_trainable():
+    obj = NonTrainableClass()
+    obj._param._data = 10  # Change node value
+    obj._param2._data = 20  # Change another node value
+    temp_file = "temp_non_trainable.py"
+    try:
+        obj.model_dump(temp_file)
+        with open(temp_file, "r") as f:
+            content = f.read()
+            # Check if class definition is present
+            assert "class NonTrainableClass:" in content
+            # Check if node initializations were replaced with current values
+            assert "self._param = 10" in content
+            assert "self._param2 = 20" in content
+            # Verify no node() calls remain
+            assert "node(" not in content
+            # Verify no bundle decorators remain
+            assert "@bundle" not in content
+            # Check if methods are present but without decorators
+            assert "def non_trainable_method" in content
+            assert "def another_non_trainable" in content
+            # Check if regular attribute is present
+            assert "regular_attr" in content
+    finally:
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+
+def test_model_dump_mixed_trainable():
+
+    @model
+    class MixedClass:
+        def __init__(self):
+            super().__init__()
+            self._trainable = node(1, trainable=True)
+            self._non_trainable = node(2, trainable=False)
+            self.regular_attr = "test"
+
+        @bundle(trainable=True)
+        def trainable_method(self, x):
+            return x
+
+        @bundle(trainable=False)
+        def non_trainable_method(self, y):
+            return y + 1
+
+
+    obj = MixedClass()
+    obj._trainable._data = 100
+    obj._non_trainable._data = 200
+
+    temp_file = "temp_mixed.py"
+    try:
+        obj.model_dump(temp_file)
+        with open(temp_file, "r") as f:
+            content = f.read()
+            # Check if class definition is present
+            assert "class MixedClass:" in content
+            # Check if all node initializations were replaced
+            assert "self._trainable = 100" in content
+            assert "self._non_trainable = 200" in content
+            # Verify no node() calls remain
+            assert "node(" not in content
+            # Verify no bundle decorators remain
+            assert "@bundle" not in content
+            # Check if methods are present but without decorators
+            assert "def trainable_method" in content
+            assert "def non_trainable_method" in content
+            # Check if regular attribute is present
+            assert "regular_attr" in content
+    finally:
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+
