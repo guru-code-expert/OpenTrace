@@ -110,6 +110,7 @@ class Minibatch(AlgorithmBase):
 
         log_frequency = log_frequency or eval_frequency  # frequency of logging (default to eval_frequency)
         num_threads = num_threads or self.num_threads  # Use provided num_threads or fall back to self.num_threads
+        test_dataset = test_dataset or train_dataset  # default to train_dataset if test_dataset is not provided
         use_asyncio = self._use_asyncio(num_threads)
 
         # Evaluate the agent before learning
