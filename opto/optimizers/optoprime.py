@@ -479,7 +479,12 @@ class OptoPrime(Optimizer):
             if node.trainable and node.py_name in suggestion:
                 try:
                     from black import format_str, FileMode
-                    formatted_suggestion = suggestion[node.py_name]
+                   # Handle code parameters specially
+                    if "__code" in node.py_name and "code" in suggestion:
+                        formatted_suggestion = suggestion["code"]
+                    else:
+                        formatted_suggestion = suggestion[node.py_name]
+                    # formatted_suggestion = suggestion[node.py_name]
                     # use black formatter for code reformatting
                     if type(formatted_suggestion) == str and 'def' in formatted_suggestion:
                         formatted_suggestion = format_str(formatted_suggestion, mode=FileMode())
