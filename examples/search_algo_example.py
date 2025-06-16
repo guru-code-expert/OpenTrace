@@ -18,7 +18,7 @@ from opto.trainer.algorithms.beamsearch_algorithm import BeamsearchAlgorithm, Be
 from opto.trainer.algorithms.UCBsearch import UCBSearchAlgorithm, HybridUCB_LLM, UCBSearchFunctionApproximationAlgorithm
 from opto.trainer.guide import AutoGuide
 from opto.trainer.loggers import DefaultLogger
-from opto.utils.llm import LLM, LiteLLM
+from opto.utils.llm import LLM
 
 # Set default model
 # os.environ["TRACE_LITELLM_MODEL"] = "vertex_ai/gemini-2.0-flash"
@@ -41,7 +41,7 @@ class Learner(Module):
         super().__init__()
         self.system_prompt = trace.node(system_prompt, trainable=True)
         self.user_prompt_template = trace.node(user_prompt_template, trainable=True)
-        self.llm = llm or LiteLLM(model="gpt-3.5-turbo")
+        self.llm = llm or LLM(model="gpt-3.5-turbo")
 
     @trace.bundle()
     def call_llm(self, system_prompt: str, user_prompt: str) -> str:
@@ -85,7 +85,7 @@ class TeacherGuide(AutoGuide):
             model: The LLM model to use for evaluation
         """
         super().__init__()
-        self.guide_llm = LiteLLM(model=model)
+        self.guide_llm = LLM(model=model)
         self.system_prompt = "You are an expert math teacher evaluating student answers."
         self.judge_prompt_template = (
             "Carefully review the following three distinct sections:\n\n"
@@ -252,7 +252,7 @@ def main():
     
     # Set environment variables
     os.environ["TRACE_LITELLM_MODEL"] = args.trace_model
-    
+        
     # Set random seed
     np.random.seed(args.seed)
     
@@ -283,7 +283,7 @@ def main():
 
     # Initialize components
     print("Initializing Agent, Guide, Optimizer, Algorithm...")
-    student_llm = LiteLLM(model=args.student_model)
+    student_llm = LLM(model=args.student_model)
     agent = Learner(llm=student_llm)
 
     train_guide = TeacherGuide(model=args.teacher_model)
@@ -291,7 +291,7 @@ def main():
 
     optimizer = OptoPrime(agent.parameters())
     logger = SimpleLogger()
-
+    
     # Create algorithm
     if args.algorithm_type == 'minibatch':
         algorithm = MinibatchAlgorithm(
