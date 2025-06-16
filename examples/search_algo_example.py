@@ -199,11 +199,11 @@ def main():
                        help='Number of test samples')
     
     # LLM Model parameters
-    parser.add_argument('--trace_model', type=str, default='vertex_ai/gemini-2.0-flash',
+    parser.add_argument('--trace_model', type=str, default=None,
                        help='Model to use for trace operations')
-    parser.add_argument('--student_model', type=str, default='vertex_ai/gemini-2.0-flash',
+    parser.add_argument('--student_model', type=str, default=None,
                        help='Model to use for student agent')
-    parser.add_argument('--teacher_model', type=str, default='vertex_ai/gemini-2.0-flash',
+    parser.add_argument('--teacher_model', type=str, default=None,
                        help='Model to use for teacher guide')
     
     # Training parameters
@@ -251,8 +251,9 @@ def main():
     args = parser.parse_args()
     
     # Set environment variables
-    os.environ["TRACE_LITELLM_MODEL"] = args.trace_model
-        
+    if args.trace_model:
+        os.environ["TRACE_LITELLM_MODEL"] = args.trace_model
+
     # Set random seed
     np.random.seed(args.seed)
     

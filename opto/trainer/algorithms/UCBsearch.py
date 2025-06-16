@@ -12,7 +12,7 @@ from opto import trace
 from opto.trainer.utils import async_run # Assuming print_color is in utils
 from opto.optimizers.utils import print_color
 from opto.trainer.algorithms.basic_algorithms import MinibatchAlgorithm, evaluate, batchify # evaluate and batchify might be useful
-from opto.utils.llm import LiteLLM # For the selector LLM
+from opto.utils.llm import LLM # For the selector LLM
 
 from opto.trace.nodes import ParameterNode
 import warnings
@@ -399,18 +399,13 @@ class HybridUCB_LLM(MinibatchAlgorithm):
     If the buffer is full, evicts the candidate with the lowest UCB score.
     """
 
-    # LLM prompt templates as class attributes for easy customization
-    SYSTEM_PROMPT_TEMPLATE = "You are an expert in model optimization. Your task is to propose new string values for model parameters with high UCB scores. Please output ONLY a valid JSON dictionary where keys are parameter names and values are the new string values for those parameters, matching the example structure provided. Do not add any explanations or markdown formatting around the JSON."
-    
-    USER_PROMPT_TEMPLATE = "Here are some current candidates from the search buffer and their statistics:\n{candidates}\n\nHere is an example of the required JSON output structure (parameter names as keys, new string values as values):\n{example_structure}\n\nPlease generate a new set of parameters in exactly the same JSON format. Make sure use double quotes for the keys and values."
-
     def __init__(self,
                  agent: trace.Module,
                  optimizer,
                  max_buffer_size: int = 10,
                  ucb_exploration_factor: float = 1.0,
                  alpha: float = 0.7,
-                 llm_model: str = "vertex_ai/gemini-2.0-flash",
+                 llm_model: str = None,
                  logger=None,
                  num_threads: int = None,
                  *args,
@@ -430,8 +425,8 @@ class HybridUCB_LLM(MinibatchAlgorithm):
 
         self._total_evaluations_tracker = 0
 
-        # Initialize LiteLLM
-        self.llm = LiteLLM(model=self.llm_model)
+        # Initialize LLM
+        self.llm = LLM(model=self.llm_model)
         print_color(f"Initialized HybridUCB_LLM with alpha={self.alpha}, LLM model={self.llm_model}", "cyan")
 
     def _sample_minibatch(self, dataset: Dict[str, List[Any]], batch_size: int) -> Tuple[List[Any], List[Any]]:
@@ -540,8 +535,8 @@ class HybridUCB_LLM(MinibatchAlgorithm):
         example_param_structure_json_str = {getattr(p,'py_name'): copy.deepcopy(p.data) for p in self.agent.parameters()}
 
         prompt_messages = [
-            {"role": "system", "content": self.SYSTEM_PROMPT_TEMPLATE},
-            {"role": "user", "content": self.USER_PROMPT_TEMPLATE.format(candidates=serializable_candidate_summaries, example_structure=example_param_structure_json_str)}
+            {"role": "system", "content": "You are an expert in model optimization. Your task is to propose new string values for model parameters with high UCB scores. Please output ONLY a valid JSON dictionary where keys are parameter names and values are the new string values for those parameters, matching the example structure provided. Do not add any explanations or markdown formatting around the JSON."},
+            {"role": "user", "content": f"Here are some current candidates from the search buffer and their statistics:\\n{serializable_candidate_summaries}\\n\\nHere is an example of the required JSON output structure (parameter names as keys, new string values as values):\\n{example_param_structure_json_str}\\n\\nPlease generate a new set of parameters in exactly the same JSON format. Make sure use double quotes for the keys and values."}
         ]
         
         print_color(f"LLM prompt (summary): {len(prompt_candidates)} candidates, structure example provided.", "magenta")
@@ -878,15 +873,10 @@ class UCBSearchFunctionApproximationAlgorithm(UCBSearchAlgorithm):
     UCB Search Algorithm that uses LLM function approximation to select candidates.
     """
     
-    # LLM prompt templates as class attributes for easy customization
-    SYSTEM_PROMPT_TEMPLATE = "You are an expert in model optimization. Your task is to propose new string values for model parameters with high UCB scores. Please output ONLY a valid JSON dictionary where keys are parameter names and values are the new string values for those parameters, matching the example structure provided. Do not add any explanations or markdown formatting around the JSON."
-    
-    USER_PROMPT_TEMPLATE = "Here are some current candidates from the search buffer and their statistics:\n{candidates}\n\nHere is an example of the required JSON output structure (parameter names as keys, new string values as values):\n{example_structure}\n\nPlease generate a new set of parameters in exactly the same JSON format. Make sure use double quotes for the keys and values."
-    
     def __init__(self, llm_model, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.llm_model = llm_model
-        self.llm = LiteLLM(model=self.llm_model)
+        self.llm = LLM(model=self.llm_model)
         print_color(f"Initialized UCBSearchFunctionApproximationAlgorithm with LLM model={self.llm_model}", "cyan")
     
     def select(self, buffer): 
@@ -926,13 +916,13 @@ class UCBSearchFunctionApproximationAlgorithm(UCBSearchAlgorithm):
         example_param_structure_json_str = {getattr(p,'py_name'): copy.deepcopy(p.data) for p in self.agent.parameters()}
 
         prompt_messages = [
-            {"role": "system", "content": self.SYSTEM_PROMPT_TEMPLATE},
-            {"role": "user", "content": self.USER_PROMPT_TEMPLATE.format(candidates=serializable_candidate_summaries, example_structure=example_param_structure_json_str)}
+            {"role": "system", "content": "You are an expert in model optimization. Your task is to propose new string values for model parameters with high UCB scores. Please output ONLY a valid JSON dictionary where keys are parameter names and values are the new string values for those parameters, matching the example structure provided. Do not add any explanations or markdown formatting around the JSON."},
+            {"role": "user", "content": f"Here are some current candidates from the search buffer and their statistics:\\n{serializable_candidate_summaries}\\n\\nHere is an example of the required JSON output structure (parameter names as keys, new string values as values):\\n{example_param_structure_json_str}\\n\\nPlease generate a new set of parameters in exactly the same JSON format. Make sure use double quotes for the keys and values."}
         ]
         
         print_color(f"LLM prompt (summary): {len(prompt_candidates)} candidates, structure example provided.", "magenta")
         
-        llm_response = self.llm(prompt_messages) 
+        llm_response = self.llm(messages=prompt_messages) 
         llm_response_str = llm_response.choices[0].message.content
 
         if not llm_response_str:
