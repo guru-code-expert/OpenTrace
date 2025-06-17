@@ -259,6 +259,7 @@ class OptoPrime(Optimizer):
         max_tokens=4096,
         log=True,
         prompt_symbols=None,
+        use_json_object_format=True,  # whether to use json object format for the response when calling LLM
         **kwargs,
     ):
         super().__init__(parameters, *args, propagator=propagator, **kwargs)
@@ -294,6 +295,7 @@ class OptoPrime(Optimizer):
         self.prompt_symbols = copy.deepcopy(self.default_prompt_symbols)
         if prompt_symbols is not None:
             self.prompt_symbols.update(prompt_symbols)
+        self.use_json_object_format = use_json_object_format
 
     def default_propagator(self):
         """Return the default Propagator object of the optimizer."""
@@ -478,16 +480,7 @@ class OptoPrime(Optimizer):
         for node in self.parameters:
             if node.trainable and node.py_name in suggestion:
                 try:
-                    from black import format_str, FileMode
-                   # Handle code parameters specially
-                    if "__code" in node.py_name and "code" in suggestion:
-                        formatted_suggestion = suggestion["code"]
-                    else:
-                        formatted_suggestion = suggestion[node.py_name]
-                    # formatted_suggestion = suggestion[node.py_name]
-                    # use black formatter for code reformatting
-                    if type(formatted_suggestion) == str and 'def' in formatted_suggestion:
-                        formatted_suggestion = format_str(formatted_suggestion, mode=FileMode())
+                    formatted_suggestion = suggestion[node.py_name]
                     update_dict[node] = type(node.data)(formatted_suggestion)
                 except (ValueError, KeyError) as e:
                     # catch error due to suggestion missing the key or wrong data type
@@ -566,15 +559,13 @@ class OptoPrime(Optimizer):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-
+    
+        response_format =  {"type": "json_object"} if self.use_json_object_format else None
         try:  # Try tp force it to be a json object
-            response = self.llm(
-                messages=messages,
-                response_format={"type": "json_object"},
-                max_tokens=max_tokens,
-            )
+            response = self.llm(messages=messages, max_tokens=max_tokens, response_format=response_format)
         except Exception:
             response = self.llm(messages=messages, max_tokens=max_tokens)
+        
         response = response.choices[0].message.content
 
         if verbose:
