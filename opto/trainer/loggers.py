@@ -79,6 +79,44 @@ class TensorboardLogger(ConsoleLogger):
             # Otherwise, log it as a scalar
             self.writer.add_scalar(name, data, step)
 
-# TODO add wandb logger
+class WandbLogger(ConsoleLogger):
+    """A logger that writes metrics to Weights and Biases (wandb)."""
+    
+    def __init__(self, log_dir='./logs', verbose=True, project=None, **kwargs):
+        super().__init__(log_dir, **kwargs)
+        self.verbose = verbose
+        # Late import to avoid dependency issues
+        try:
+            import wandb
+        except ImportError:
+            raise ImportError("wandb is required for WandbLogger. Install it with: pip install wandb")
+        
+        # Initialize wandb
+        self.wandb = wandb
+        if not wandb.run:
+            wandb.init(project=project, dir=log_dir, **kwargs)
+
+    def log(self, name, data, step, **kwargs):
+        """Log a message to Weights and Biases.
+        
+        Args:
+            name: Name of the metric
+            data: Value of the metric
+            step: Current step/iteration
+            **kwargs: Additional arguments (not used here)
+        """
+        if self.verbose:
+            super().log(name, data, step, **kwargs)
+        
+        # Log to wandb
+        if isinstance(data, str):
+            # For string data, we can log it as a custom chart or just print it
+            # wandb doesn't have a direct equivalent to tensorboard's add_text
+            # but we can log it in a structured way
+            self.wandb.log({f"{name}_text": data}, step=step)
+        else:
+            # For numeric data, log as scalar
+            self.wandb.log({name: data}, step=step)
+
 
 DefaultLogger = ConsoleLogger
