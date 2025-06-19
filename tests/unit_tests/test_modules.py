@@ -339,6 +339,64 @@ def test_model_dump_mixed_trainable():
             assert "regular_attr" in content
     finally:
         if os.path.exists(temp_file):
-            pass
-            # os.remove(temp_file)
+            os.remove(temp_file)
 
+def test_model_dump_and_import():
+    @model
+    class StrangeCalculator:
+        def __init__(self):
+            super().__init__()
+            self.offset = node(2, trainable=True)
+            self.multiplier = node(1.5, trainable=True)
+        
+        @bundle(trainable=True)
+        def add(self, x, y):
+            """Add two numbers with an offset"""
+            return x + y + self.offset
+        
+        @bundle(trainable=True)
+        def multiply(self, x, y):
+            """Multiply two numbers with a multiplier"""
+            return x * y * self.multiplier
+    
+    # Create instance and modify parameters
+    calc = StrangeCalculator()
+    calc.offset._data = 3
+    calc.multiplier._data = 2.0
+    calc.add.parameter._data = "def add(self, x, y):\n    return x + y + self.offset + 1"
+    calc.multiply.parameter._data = "def multiply(self, x, y):\n    return x * y * self.multiplier * 2"
+    
+    # Dump the model
+    temp_file = "temp_calculator.py"
+    try:
+        calc.model_dump(temp_file)
+        
+        # Import the dumped class
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("temp_calculator", temp_file)
+        temp_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(temp_module)
+        
+        # Get the imported class
+        ImportedCalculator = temp_module.StrangeCalculator
+        
+        # Create instance and test functionality
+        imported_calc = ImportedCalculator()
+        
+        # Test the modified behavior
+        result_add = imported_calc.add(5, 3)
+        result_multiply = imported_calc.multiply(4, 2)
+        
+        # Verify the results match our expected modified behavior
+        # add: 5 + 3 + 3 + 1 = 12
+        # multiply: 4 * 2 * 2.0 * 2 = 32
+        assert result_add == 12, f"Expected 12, got {result_add}"
+        assert result_multiply == 32, f"Expected 32, got {result_multiply}"
+        
+        # Verify the attributes have the correct values
+        assert imported_calc.offset == 3
+        assert imported_calc.multiplier == 2.0
+        
+    finally:
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
