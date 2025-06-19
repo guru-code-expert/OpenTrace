@@ -315,6 +315,8 @@ def test_model_dump_mixed_trainable():
     obj._trainable._data = 100
     obj._non_trainable._data = 200
 
+    obj.trainable_method.parameter._data = "def trainable_method(self, x):\n     return x + 3"
+
     temp_file = "temp_mixed.py"
     try:
         obj.model_dump(temp_file)
@@ -331,10 +333,12 @@ def test_model_dump_mixed_trainable():
             assert "@bundle" not in content
             # Check if methods are present but without decorators
             assert "def trainable_method" in content
+            assert "return x + 3" in content
             assert "def non_trainable_method" in content
             # Check if regular attribute is present
             assert "regular_attr" in content
     finally:
         if os.path.exists(temp_file):
-            os.remove(temp_file)
+            pass
+            # os.remove(temp_file)
 

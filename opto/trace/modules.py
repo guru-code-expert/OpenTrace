@@ -7,6 +7,8 @@ from opto.trace.containers import ParameterContainer, trainable_method
 from opto.trace.nodes import ParameterNode
 from opto.trace.projections import Projection, BlackCodeFormatter
 
+import functools
+from typing import List, Optional
 
 def model(cls):
     """
@@ -14,10 +16,13 @@ def model(cls):
     """
 
     class ModelWrapper(cls, Module):
-        def model_dump(self, filename, projection: Projection = BlackCodeFormatter()):
+        def model_dump(self, filename, projections: Optional[List[Projection]] = None):
             """Dump the model's source code to a file, including all methods and attributes.
             Ignores dunder methods unless they were overridden by the user.
             """
+            if projections is None:
+                projections = [BlackCodeFormatter()]
+
             trace_model_body = f"class {cls.__name__}:\n"
             
             # Get all members of the class
@@ -86,8 +91,7 @@ def model(cls):
             
             trace_model_body = re.sub(node_pattern, replace_node, trace_model_body)
 
-            if projection is not None:
-                trace_model_body = projection.project(trace_model_body)
+            trace_model_body = functools.reduce(lambda body, proj: proj.project(body), projections, trace_model_body)
 
             with open(filename, "w") as f:
                 f.write(trace_model_body)
