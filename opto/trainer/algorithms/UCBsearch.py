@@ -27,7 +27,8 @@ class UCBSearchAlgorithm(MinibatchAlgorithm):
                  agent: trace.Module,
                  optimizer,
                  max_buffer_size: int = 10,
-                 ucb_exploration_factor: float = 1.0,
+                 ucb_exploration_factor: float = 1.0,  # Controls exploration vs exploitation tradeoff in UCB selection
+                                                     # UCB formula: μ(a) + c * sqrt(ln(t) / n(a)), c is the exploration factor
                  logger=None,
                  num_threads: int = None,
                  *args,
@@ -36,6 +37,8 @@ class UCBSearchAlgorithm(MinibatchAlgorithm):
         
         self.buffer = deque(maxlen=max_buffer_size) 
         self.max_buffer_size = max_buffer_size
+        # UCB exploration factor: Higher values encourage more exploration of less-tested candidates,
+        # lower values favor exploitation of well-performing candidates. 
         self.ucb_exploration_factor = ucb_exploration_factor
         
         # To ensure optimizer_step can be called with bypassing=True if needed.
@@ -76,7 +79,7 @@ class UCBSearchAlgorithm(MinibatchAlgorithm):
             print_color("Evaluation dataset is empty or invalid. Returning score -inf, count 0.", color='yellow')
             return -np.inf, 0
 
-        original_params = {p: copy.deepcopy(p.data) for p in self.agent.parameters()}
+        original_params = {p: copy.deepcopy(p.data) for p in self.optimizer.parameters()}
         self.optimizer.update(params_to_eval_dict)      
 
         eval_xs, eval_infos = self._sample_minibatch(dataset, evaluation_batch_size) # Use evaluation_batch_size
@@ -114,6 +117,8 @@ class UCBSearchAlgorithm(MinibatchAlgorithm):
         if total_tracked_evaluations == 0: # Should not happen if we init with one eval
              total_tracked_evaluations = 1
         
+        # UCB exploration term: ucb_exploration_factor scales the confidence interval
+        # Higher factor = more exploration, lower factor = more exploitation
         exploration_term = self.ucb_exploration_factor * \
                            math.sqrt(math.log(total_tracked_evaluations) / candidate_buffer_entry['eval_count'])
         
@@ -131,6 +136,7 @@ class UCBSearchAlgorithm(MinibatchAlgorithm):
               guide,  # Guide for train_dataset (feedback generation AND evaluation)
               train_dataset: Dict[str, List[Any]],
               *,
+              validation_dataset: Optional[Dict[str, List[Any]]] = None,  # Validation set for evaluation, defaults to train_dataset
               num_search_iterations: int = 100,
               train_batch_size: int = 2, 
               evaluation_batch_size: int = 20, # Renamed from validation_batch_size, used for all explicit evaluations
@@ -146,6 +152,10 @@ class UCBSearchAlgorithm(MinibatchAlgorithm):
         """
         Main training loop for UCB Search Algorithm.
         """
+        # Default validation_dataset to train_dataset if not provided
+        if validation_dataset is None:
+            validation_dataset = train_dataset
+            
         num_threads = num_threads or self.num_threads
         log_frequency = log_frequency or eval_frequency
         self.min_score = min_score_for_agent_update # Used by parent's evaluate if called, or our own _evaluate_candidate
@@ -161,10 +171,10 @@ class UCBSearchAlgorithm(MinibatchAlgorithm):
         }
 
 # 0. Evaluate the initial parameter on samples of the validation set and add it to the buffer.
-        print_color("Evaluating initial parameters using train_dataset samples...", 'cyan')
-        initial_params_dict = {p: copy.deepcopy(p.data) for p in self.agent.parameters()}
+        print_color("Evaluating initial parameters using validation_dataset samples...", 'cyan')
+        initial_params_dict = {p: copy.deepcopy(p.data) for p in self.optimizer.parameters()}
         initial_score, initial_evals = self._evaluate_candidate(
-            initial_params_dict, train_dataset, guide, evaluation_batch_size, num_threads # Use train_dataset and guide
+            initial_params_dict, validation_dataset, guide, evaluation_batch_size, num_threads # Use validation_dataset and guide
         )
         self._total_evaluations_tracker += initial_evals 
         total_samples += initial_evals
@@ -173,7 +183,7 @@ class UCBSearchAlgorithm(MinibatchAlgorithm):
             'params': initial_params_dict,
             'score_sum': initial_score * initial_evals if initial_score > -np.inf else 0, # Store sum for accurate mean later
             'eval_count': initial_evals,
-            'ucb_score': 0.0, # Will be updated
+            'ucb_score': None, # avoid accidental reads before it's initialized
             'iteration_created': 0
         }
         self.buffer.append(initial_candidate_entry)
@@ -236,7 +246,7 @@ class UCBSearchAlgorithm(MinibatchAlgorithm):
                 if not isinstance(a_prime_params_dict, dict) or not a_prime_params_dict:
                     print_color(f"Iter {iteration}: Optimizer.step did not return a valid param dict for a_prime. Using current agent params as a_prime.", 'yellow')
                     # Fallback: if step modified agent in-place and didn't return dict, current agent state is a_prime
-                    a_prime_params_dict = {p: copy.deepcopy(p.data) for p in self.agent.parameters()}
+                    a_prime_params_dict = {p: copy.deepcopy(p.data) for p in self.optimizer.parameters()}
 
             except Exception as e:
                 print_color(f"Iter {iteration}: Error during optimizer.step for a_prime: {e}. Skipping candidate generation.", 'red')
@@ -244,7 +254,7 @@ class UCBSearchAlgorithm(MinibatchAlgorithm):
             
             # 4. Evaluate 'a_prime' on samples of validation set
             a_prime_score, a_prime_evals = self._evaluate_candidate(
-                a_prime_params_dict, train_dataset, guide, evaluation_batch_size, num_threads # Use train_dataset and guide
+                a_prime_params_dict, validation_dataset, guide, evaluation_batch_size, num_threads # Use validation_dataset and guide
             )
             self._total_evaluations_tracker += a_prime_evals
             total_samples += evaluation_batch_size + train_batch_size
@@ -263,7 +273,7 @@ class UCBSearchAlgorithm(MinibatchAlgorithm):
                     'params': a_prime_params_dict, 
                     'score_sum': a_prime_score * a_prime_evals, # Store sum
                     'eval_count': a_prime_evals,
-                    'ucb_score': 0.0, # Will be updated
+                    'ucb_score': None, # avoid accidental reads before it's initializad
                     'iteration_created': iteration
                 }
                 
