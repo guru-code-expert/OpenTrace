@@ -67,7 +67,7 @@ class BeamsearchAlgorithm(MinibatchAlgorithm):
         print_color(f"Using validation_dataset_size={validation_dataset_size} for intermediate evaluations", 'blue')
         
         # Store original parameters to restore after each exploration
-        original_params = {p: copy.deepcopy(p.data) for p in self.optimizer.parameters()}
+        original_params = {p: copy.deepcopy(p.data) for p in self.optimizer.parameters}
         
         # Dictionary to track metrics during beam search
         metrics = {
@@ -384,7 +384,7 @@ class BeamsearchAlgorithm(MinibatchAlgorithm):
             If return_scores is True: Tuple of (list of parameters, list of scores)
         """
         # Store current parameters to restore later
-        current_params = {p: copy.deepcopy(p.data) for p in self.optimizer.parameters()}
+        current_params = {p: copy.deepcopy(p.data) for p in self.optimizer.parameters}
         
         # List to store (score, params) pairs
         scored_candidates = []
@@ -495,7 +495,7 @@ class BeamsearchHistoryAlgorithm(BeamsearchAlgorithm):
         print_color(f"Using validation_dataset_size={validation_dataset_size} for intermediate evaluations", 'blue')
 
         # Store original parameters
-        original_params = {p: copy.deepcopy(p.data) for p in self.optimizer.parameters()}
+        original_params = {p: copy.deepcopy(p.data) for p in self.optimizer.parameters}
 
         # Dictionary to track metrics
         metrics = {

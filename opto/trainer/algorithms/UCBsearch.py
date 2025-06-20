@@ -79,7 +79,7 @@ class UCBSearchAlgorithm(MinibatchAlgorithm):
             print_color("Evaluation dataset is empty or invalid. Returning score -inf, count 0.", color='yellow')
             return -np.inf, 0
 
-        original_params = {p: copy.deepcopy(p.data) for p in self.optimizer.parameters()}
+        original_params = {p: copy.deepcopy(p.data) for p in self.optimizer.parameters}
         self.optimizer.update(params_to_eval_dict)      
 
         eval_xs, eval_infos = self._sample_minibatch(dataset, evaluation_batch_size) # Use evaluation_batch_size
@@ -172,7 +172,7 @@ class UCBSearchAlgorithm(MinibatchAlgorithm):
 
 # 0. Evaluate the initial parameter on samples of the validation set and add it to the buffer.
         print_color("Evaluating initial parameters using validation_dataset samples...", 'cyan')
-        initial_params_dict = {p: copy.deepcopy(p.data) for p in self.optimizer.parameters()}
+        initial_params_dict = {p: copy.deepcopy(p.data) for p in self.optimizer.parameters}
         initial_score, initial_evals = self._evaluate_candidate(
             initial_params_dict, validation_dataset, guide, evaluation_batch_size, num_threads # Use validation_dataset and guide
         )
@@ -246,7 +246,7 @@ class UCBSearchAlgorithm(MinibatchAlgorithm):
                 if not isinstance(a_prime_params_dict, dict) or not a_prime_params_dict:
                     print_color(f"Iter {iteration}: Optimizer.step did not return a valid param dict for a_prime. Using current agent params as a_prime.", 'yellow')
                     # Fallback: if step modified agent in-place and didn't return dict, current agent state is a_prime
-                    a_prime_params_dict = {p: copy.deepcopy(p.data) for p in self.optimizer.parameters()}
+                    a_prime_params_dict = {p: copy.deepcopy(p.data) for p in self.optimizer.parameters}
 
             except Exception as e:
                 print_color(f"Iter {iteration}: Error during optimizer.step for a_prime: {e}. Skipping candidate generation.", 'red')
