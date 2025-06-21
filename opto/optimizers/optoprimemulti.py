@@ -2,10 +2,9 @@ from typing import Any, List, Dict, Union, Optional
 import json
 from typing import List, Dict
 
-
-
 from opto.trace.propagators import GraphPropagator
 from opto.optimizers.optoprime import OptoPrime
+from opto.utils.llm import LLMFactory
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -68,6 +67,8 @@ class OptoPrimeMulti(OptoPrime):
             profile = self.llm_profiles[profile_idx]
             llm = self._get_llm_for_profile(profile)
             llms.append(llm)
+        
+        return llms
         
     def call_llm(
         self,
@@ -209,11 +210,10 @@ class OptoPrimeMulti(OptoPrime):
 
         if self.llm_profiles is not None and len(self.llm_profiles) > 0 and generation_technique == "multi_llm":
             llms = self._get_llms_for_generation(num_responses)
-            temperatures = [temp_max - i * (temp_max - temp_min) / max(1, num_responses - 1) for i in range(num_responses)]
             
             # Prepare arguments for parallel execution
             arg_dicts = []
-            for i, (llm, temp) in enumerate(zip(llms, temperatures)):
+            for i, llm in enumerate(llms):
                 profile_name = self.llm_profiles[i % len(self.llm_profiles)] if self.llm_profiles else "default"
                 modified_system_prompt = f"{system_prompt}\n\n[Using {profile_name} model for diverse perspective]"
                 
@@ -223,7 +223,7 @@ class OptoPrimeMulti(OptoPrime):
                     verbose=verbose,
                     max_tokens=max_tokens,
                     num_responses=1,
-                    temperature=temp,
+                    temperature=temp_min,
                     llm=llm  # Use specific LLM
                 ))
             
@@ -251,7 +251,7 @@ class OptoPrimeMulti(OptoPrime):
                     verbose=verbose,
                     max_tokens=max_tokens,
                     num_responses=1,
-                    temperature=0.0,
+                    temperature=temp_min,
                 )
                 
                 if response and len(response) > 0:
@@ -267,7 +267,7 @@ class OptoPrimeMulti(OptoPrime):
                         f"CANDIDATE {idx + 1}: <<<\n{cand}\n>>>"
                         for idx, cand in enumerate(candidates)
                     )
-                    meta_prompt = f"{system_prompt}\nGiven the following candidate solutions, propose a new alternative optimal solution to user's prompt using their same JSON format (suggest only trainable codes/variables to modify, never inputs):\n{previous_solutions}\n"
+                    meta_prompt = f"{system_prompt}\nGiven the following prior CANDIDATE solutions, answer with a very different new CANDIDATE optimal solution to user's prompt using their same JSON format (suggest only trainable codes/variables to modify, never inputs):\n{previous_solutions}\n"
                 
                 response = self.call_llm(
                     system_prompt=meta_prompt,
@@ -275,7 +275,7 @@ class OptoPrimeMulti(OptoPrime):
                     verbose=verbose,
                     max_tokens=max_tokens,
                     num_responses=1,
-                    temperature=0.0,
+                    temperature=temp_min,
                 )
                 
                 if response and len(response) > 0:
