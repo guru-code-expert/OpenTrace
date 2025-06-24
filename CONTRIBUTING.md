@@ -21,7 +21,9 @@ Here is an outline:
 
 6. [Exception] Updates to non-coding elements (like documents) does not necessarily require a PR. 
 
-The above is applicable to all contributors including the maintainers.
+The above is applicable to all contributors, including the maintainers.
+
+All the features and bug fixes are merged into the experimental branch. After features are all added to the experimental branch, a version branch (e.g., `0.2.1`) will be created from `experimental`, and it will be staged for a release (merge into the main branch).
 
 ![workflow](https://github.com/AgentOpt/Trace/blob/experimental/docs/images/contributing_workflow.png?raw=true)
 
