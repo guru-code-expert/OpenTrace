@@ -19,7 +19,7 @@ Here is an outline:
 
 5. [**LIGHT**]  For contributions under the directory `opto/features`, they should be submitted as PR to the `experimental` branch. These usually are not under roadmap and are content not made as dependable by codes in other directories. That is, contents under `opto/features/A` should not be imported by files other than those under `opto/features/A`. So long as this rule is met, the PR will be incorprated under a light review.
 
-6. [Exception] Updates to non-coding elements (like documents) does not necessarily require a PR. 
+6. [Exception] Core contributors only: Updates to non-coding elements (like documents) do not necessarily require a PR
 
 The above is applicable to all contributors, including the maintainers.
 
