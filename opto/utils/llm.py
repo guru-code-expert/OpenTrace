@@ -240,7 +240,42 @@ _LLM_REGISTRY = {
 }
 
 class LLMFactory:
-    """Factory for creating LLM instances with predefined profiles."""
+    """Factory for creating LLM instances with predefined profiles.
+    
+    The code comes with these built-in profiles:
+
+        llm_default = LLM(profile="default")     # gpt-4o-mini
+        llm_premium = LLM(profile="premium")     # gpt-4  
+        llm_cheap = LLM(profile="cheap")         # gpt-4o-mini
+        llm_fast = LLM(profile="fast")           # gpt-3.5-turbo-mini
+        llm_reasoning = LLM(profile="reasoning") # o1-mini
+    
+    You can override those built-in profiles:
+
+        LLMFactory.register_profile("default", "LiteLLM", model="gpt-4o", temperature=0.5)
+        LLMFactory.register_profile("premium", "LiteLLM", model="o1-preview", max_tokens=8000)
+        LLMFactory.register_profile("cheap", "LiteLLM", model="gpt-3.5-turbo", temperature=0.9)
+        LLMFactory.register_profile("fast", "LiteLLM", model="gpt-3.5-turbo", max_tokens=500)
+        LLMFactory.register_profile("reasoning", "LiteLLM", model="o1-preview")
+        
+    An Example of using Different Backends
+
+        # Register custom profiles for different use cases
+        LLMFactory.register_profile("advanced_reasoning", "LiteLLM", model="o1-preview", max_tokens=4000)
+        LLMFactory.register_profile("claude_sonnet", "LiteLLM", model="claude-3-5-sonnet-latest", temperature=0.3)
+        LLMFactory.register_profile("custom_server", "CustomLLM", model="llama-3.1-8b")
+
+        # Use in different contexts
+        reasoning_llm = LLM(profile="advanced_reasoning")  # For complex reasoning
+        claude_llm = LLM(profile="claude_sonnet")          # For Claude responses
+        local_llm = LLM(profile="custom_server")           # For local deployment
+
+        # Single LLM optimizer with custom profile
+        optimizer1 = OptoPrime(parameters, llm=LLM(profile="advanced_reasoning"))
+
+        # Multi-LLM optimizer with multiple profiles
+        optimizer2 = OptoPrimeMulti(parameters, llm_profiles=["cheap", "premium", "claude_sonnet"], generation_technique="multi_llm")
+    """
     
     # Default profiles for different use cases
     _profiles = {
