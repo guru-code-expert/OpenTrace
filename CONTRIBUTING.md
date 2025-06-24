@@ -23,6 +23,7 @@ Here is an outline:
 
 The above is applicable to all contributors including the maintainers.
 
+![workflow](https://github.com/AgentOpt/Trace/blob/experimental/docs/images/contributing_workflow.png?raw=true)
 
 ### Communication
 
