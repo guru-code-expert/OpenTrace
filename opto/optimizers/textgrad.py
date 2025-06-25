@@ -413,7 +413,6 @@ class TextGrad(Optimizer):
             "variable_value": node.data,
             "variable_grad": self._get_gradient_and_context_text(gradients),
             "variable_short": get_short_value(node.data),
-            "constraint_text": node._constraint,
             "new_variable_start_tag": self.new_variable_tags[0],
             "new_variable_end_tag": self.new_variable_tags[1],
             # "in_context_examples": "\n".join(self.in_context_examples),

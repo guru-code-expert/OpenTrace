@@ -191,7 +191,7 @@ class FunModule(Module):
             self.parameter = ParameterNode(
                 self.info["source"],
                 name="__code",
-                constraint="The code should start with:\n" + signature,
+                description="The code should start with:\n" + signature,
                 projections=projections,
             )
 
