@@ -9,7 +9,7 @@ Merging a PR requires at least one reviewer different from the contributor, exce
 
 Here is an outline: 
 
-1. `main` will be regularly updated by PRs based on the development of the `experimental` branch following the [roadmap doc](https://docs.google.com/spreadsheets/d/1dMoECd2Soj6bATpkNDeaMxl0ymOYCtGq7ZiHr0JRdJU/edit?usp=sharing). Each update will result in a version update of the first two digits.
+1. `main` will be regularly updated by PRs based on the development of the `experimental` branch following the [roadmap doc](https://docs.google.com/spreadsheets/d/1dMoECd2Soj6bATpkNDeaMxl0ymOYCtGq7ZiHr0JRdJU/edit?usp=sharing). Each update will result in a version update.
 
 2. Except for the planned roadmap, `main` will only be updated to fix bugs.  Bug fix to what is in `main` should be submitted as PR to `main`. This will trigger a quicker review and result in a version update in the third digit, and the `experimental` branch will then rebase on the updated `main`.
 
