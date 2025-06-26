@@ -802,11 +802,11 @@ class Node(AbstractNode[T]):
         """
 
         if description == "" or description is None:
-            description = f"[Node] type: {type(value)}"
+            description = f"[{type(self).__name__}] type: {type(value)}"
 
         matched = re.match(r"^\[([^\[\]]+)\]", description)
         if not matched:
-            description = "[Node] " + description.strip()
+            description = f"[{type(self).__name__}] " + description.strip()
 
         super().__init__(value, name=name)
         self.trainable = trainable
@@ -2009,12 +2009,6 @@ class ParameterNode(Node[T]):
         projections=None,  # a list of Projection
         info=None,
     ) -> None:
-        if description is None or description == "":
-            description = f"[ParameterNode] type: {type(value)}"          
-
-        matched = re.match(r"^\[([^\[\]]+)\]", description)
-        if not matched:
-            description = "[ParameterNode] " + description.strip()
 
         super().__init__(
             value,
@@ -2173,7 +2167,7 @@ class ExceptionNode(MessageNode[T]):
         value: Exception,
         *,
         inputs: Union[List[Node], Dict[str, Node]],
-        description: str = "[ExceptionNode] This is node containing the error of execution.",
+        description: str = None,
         name=None,
         info=None,
     ) -> None:
