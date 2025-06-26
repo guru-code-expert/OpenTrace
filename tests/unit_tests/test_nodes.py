@@ -149,16 +149,16 @@ def test_node_description():
     assert x.description == "x"
 
     y = node(1)
-    assert y.description == "type: <class 'int'>"
-    assert y._description == "[Node] type: <class 'int'>"
+    assert y.description == None
+    assert y._description == "[Node]"
 
     x = node(1, description="x", trainable=True)
     assert x.description == "x"
     assert x._description == "[ParameterNode] x"
 
     x = node(1, trainable=True)
-    assert x.description == "type: <class 'int'>"
-    assert x._description == "[ParameterNode] type: <class 'int'>"
+    assert x.description == None
+    assert x._description == "[ParameterNode]"
 
 
 def test_iterating_numpy_array():

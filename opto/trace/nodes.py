@@ -587,8 +587,9 @@ class NodeVizStyleGuide:
         """
         # using colon in the name causes problems in graphviz
         description = x.description
-        if len(x.description) > self.print_limit:
-            description = x.description[: self.print_limit] + "..."
+        description = '' if description is None else description
+        if len(description) > self.print_limit:
+            description = description[: self.print_limit] + "..."
 
         text = x.py_name + "\n" + description + "\n"
         content = str(x.data)
@@ -802,7 +803,7 @@ class Node(AbstractNode[T]):
         """
 
         if description == "" or description is None:
-            description = f"[{type(self).__name__}] type: {type(value)}"
+            description = f"[{type(self).__name__}]"
 
         matched = re.match(r"^\[([^\[\]]+)\]", description)
         if not matched:
@@ -839,7 +840,9 @@ class Node(AbstractNode[T]):
         """A textual description of the node."""        
         # return self._description
         # remove the operator type from the description
-        return re.sub(r"^\[([^\[\]]+)\]", "", self._description).strip()
+        description = re.sub(r"^\[([^\[\]]+)\]", "", self._description).strip()
+        # return None if empty
+        return description if description else None
     
     @property
     def op_name(self):
