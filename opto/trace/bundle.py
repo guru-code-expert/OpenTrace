@@ -164,7 +164,7 @@ class FunModule(Module):
 
         if description is None:
             # Generate the description from the function name and docstring.
-            description = f"[{self.info['fun_name']}] {self.info['doc']}."
+            description = f"[{self.info['fun_name']}] {self.info['doc']}"
         assert len(get_op_name(description)) > 0
 
         self.traceable_code = traceable_code

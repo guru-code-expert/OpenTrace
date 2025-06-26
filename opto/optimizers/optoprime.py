@@ -361,7 +361,7 @@ class OptoPrime(Optimizer):
                 else ""
             ),
             documentation=(
-                "\n".join([v for v in summary.documentation.values()])
+                "\n".join([f"[{k}] {v}" for k, v in summary.documentation.items()])
                 if "#Documentation" not in mask
                 else ""
             ),
