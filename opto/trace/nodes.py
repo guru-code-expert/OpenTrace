@@ -761,13 +761,13 @@ class Node(AbstractNode[T]):
         value (Any): The value to be assigned to the node.
         name (str, optional): The name of the node.
         trainable (bool, optional): Whether the node is trainable or not. Defaults to False.
-        description (str, optional): String describing the node. Defaults to "[Node] This is a node in a computational graph."
+        description (str, optional): String describing the node which acts as a soft constraint. Defaults to None.
         info (Union[None, Dict], optional): Dictionary containing additional information about the node. Defaults to None.
 
     Attributes:
         trainable (bool): Whether the node is trainable or not.
         _feedback (dict): Dictionary of feedback from children nodes.
-        _description (str): String describing the node.
+        _description (str): String describing the node. Defaults to "[Node]".
         _backwarded (bool): Whether the backward method has been called.
         _info (dict): Dictionary containing additional information about the node.
         _dependencies (dict): Dictionary of dependencies on parameters and expandable nodes.
@@ -791,16 +791,7 @@ class Node(AbstractNode[T]):
         trainable: bool = False,
         description: str = None,
         info: Union[None, Dict] = None,
-    ) -> None:
-        """Initialize an instance of the Node class.
-
-        Args:
-            value: The value to be assigned to the node.
-            name: The name of the node (optional).
-            trainable: A boolean indicating whether the node is trainable or not (optional).
-            description: A string describing the node (optional).
-            info: A dictionary containing additional information about the node (optional).
-        """
+    ) -> None:    
 
         if description == "" or description is None:
             description = f"[{type(self).__name__}]"
