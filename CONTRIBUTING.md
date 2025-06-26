@@ -11,19 +11,19 @@ Here is an outline:
 
 1. `main` will be regularly updated by PRs based on the development of the `experimental` branch following the [roadmap doc](https://docs.google.com/spreadsheets/d/1dMoECd2Soj6bATpkNDeaMxl0ymOYCtGq7ZiHr0JRdJU/edit?usp=sharing). Each update will result in a version update.
 
-2. Except for the planned roadmap, `main` will only be updated to fix bugs.  Bug fix to what is in `main` should be submitted as PR to `main`. This will trigger a quicker review and result in a version update in the third digit, and the `experimental` branch will then rebase on the updated `main`.
+2. Except for the planned roadmap, `main` will only be updated to fix bugs.  Bug fix to what is in `main` should be submitted as PR to `main`. This will trigger a quicker review (< 3 days) and result in a version update in the third digit, and the `experimental` branch will then rebase on the updated `main`.
 
-3. For feature development, PR should be submitted to the `experimental` branch without version update. Generally, the `experimental` branch aims to realize the milestones listed in the next version update in the [roadmap doc](https://docs.google.com/spreadsheets/d/1dMoECd2Soj6bATpkNDeaMxl0ymOYCtGq7ZiHr0JRdJU/edit?usp=sharing). If applicable, new determinstic unit tests should be added under `tests/unit_tests`. Otherwise, an example run script should be added in `examples`.
+3. For feature development, PR should be submitted to the `experimental` branch without version update. Generally, the `experimental` branch aims to realize the milestones listed in the next version update in the [roadmap doc](https://docs.google.com/spreadsheets/d/1dMoECd2Soj6bATpkNDeaMxl0ymOYCtGq7ZiHr0JRdJU/edit?usp=sharing). If applicable, new determinstic unit tests should be added under `tests/unit_tests`, or an example run script should be added in `examples`.
 
-4. [**LIGHT**]  Bugs fix to the new changes introduced in the `experimental` branch should be submitted as a PR to the `experimental` branch. This PR will be incoporated quickly with a light review.
+4. [**LIGHT**]  Bugs fix to the new changes introduced in the `experimental` branch should be submitted as a PR to the `experimental` branch. This PR will be incoporated quickly with a light review. 
 
 5. [**LIGHT**]  For contributions under the directory `opto/features`, they should be submitted as PR to the `experimental` branch. These usually are not under roadmap and are content not made as dependable by codes in other directories. That is, contents under `opto/features/A` should not be imported by files other than those under `opto/features/A`. So long as this rule is met, the PR will be incorprated under a light review.
 
-6. [Exception] Core contributors only: Updates to non-coding elements (like documents) do not necessarily require a PR
+6. Updates to non-coding elements (like documents) do not require a PR.
 
 The above is applicable to all contributors, including the core contributors and maintainers.
 
-In a regular development cycle, all features and bug fixes are merged into the experimental branch. After the items listed in the [roadmap doc](https://docs.google.com/spreadsheets/d/1dMoECd2Soj6bATpkNDeaMxl0ymOYCtGq7ZiHr0JRdJU/edit?usp=sharing) are all added to the `experimental` branch, a version branch (e.g., `0.2.1`) will be created from `experimental`, and it will be staged for a release (to be merged into the `main` branch with a PR). At this point, the version number of the `experimental` branch will be updated to start the development of the next version.
+In a regular development cycle, all features and bug fixes are merged into the experimental branch. After the items listed in the [roadmap doc](https://docs.google.com/spreadsheets/d/1dMoECd2Soj6bATpkNDeaMxl0ymOYCtGq7ZiHr0JRdJU/edit?usp=sharing) are all added to the `experimental` branch, a version branch (e.g., `v0.2.1`) will be created from `experimental`, and it will be staged for a release (to be merged into the `main` branch with a PR). At this point, the version number of the `experimental` branch will be updated to start the development of the next version.
 
 ![workflow](https://github.com/AgentOpt/Trace/blob/experimental/docs/images/contributing_workflow.png?raw=true)
 
@@ -32,6 +32,10 @@ In a regular development cycle, all features and bug fixes are merged into the e
 1. Quick questions should be posted on Discord channel.
 
 2. For bugs, feature requests, contributions, or questions that might be related to a broader audience, post them as issues on the github page.
+
+### Other Branches
+
+In addition to `main` and `experimental`, other branches have a naming convention or `vx.x.x` for version branchs, or of `feature/xxx` or `fix/xxx`, which implements the items on the roadmap. They will be merged into the `main` or `experimental` accordingly following the rules above. Once merged, they will be removed.
 
 
 # Steps for Contributions
