@@ -51,22 +51,20 @@ If there is a minor, isolated bug that can be directly fixed, please report it a
 
 We welcome new ideas. 
 
-### Step 1: Feature Spec Doc 
-A feature should first be written as a Google Doc (an example is [here](https://docs.google.com/document/d/1FX1ygc8lgFpFn3ni3E2A_DCGtn505PpAM8QaAjEovsA/edit?usp=sharing)).
+### Step 1: Create an Issue
 
-### Step 2: Create an Issue
-An issue should be created, and under the issue, the doc is linked. People should be allowed to comment on the doc.
+If your changes are expected to involve in less 50 lines of codes, create an issue titled "[LIGHT] XXX". You should describe the motivation, give an overview of the change (e.g., by a pseudo-code) and its desired effects. Otherwise, create an issue titled "[MAJOR] XXX". You should write a more detailed description of your motivation, design, and demo. If more space is needed, you can attach a link to a Google doc. People should be allowed to comment on the doc.
 
-### Step 3: Implement Feature
-Create a separate branch, extending from the `experimental` branch. This branch contains all the new features that have not been merged into the `main` branch yet. 
+### Step 2: Implement Feature
+
+Create a separate branch, extending from the `experimental` branch, which contains all the new features that have not been merged into the `main` branch yet. 
 Make sure your features are implemented, along with `unit tests` or `examples` to show how it's used.
 
-### Step 4: Create a Pull Request
-Create a PR formally to merge into the experiment branch and request a review. For standalone features, put the changes under `opto/features/`. This will trigger the lightest review that only checks for malicious code, or if the feature does not pass its own unit tests.
-For changes to the rest, expect a slightly longer review process as we work out how the changes should be integrated with the core library.
+### Step 3: Create a Pull Request
 
+Create a PR formally to merge into the experiment branch and request a review. For standalone features, put the changes under `opto/features/`. This will trigger the lightest review that only checks for malicious code, or if the feature does not pass its own unit tests. For changes to the rest, expect a slightly longer review process as we work out how the changes should be integrated with the core library. Also, [LIGHT] issues can expect faster review than [MAJOR].
 
-### Step 5: Merge into Experimental
+### Step 4: Merge into Experimental
 Once the request is approved, it will be merged into the `experimental` branch.
 
 
