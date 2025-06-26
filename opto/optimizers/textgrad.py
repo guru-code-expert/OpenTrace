@@ -281,6 +281,7 @@ def rm_node_attrs(text: str) -> str:
     Returns:
         String with trace node attributes removed
     """
+    text = "" if text is None else text
     return re.sub(r"\[.*?\]", "", text).strip()
 
 
