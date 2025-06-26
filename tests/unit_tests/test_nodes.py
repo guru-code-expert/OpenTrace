@@ -145,16 +145,20 @@ def test_trainable_wrapping():
 
 def test_node_description():
     x = node(1, description="x")
-    assert x.description == "[Node] x"
+    assert x._description == "[Node] x"
+    assert x.description == "x"
 
     y = node(1)
-    assert y.description == '[Node] This is a node in a computational graph.'
+    assert y.description == "type: <class 'int'>"
+    assert y._description == "[Node] type: <class 'int'>"
 
     x = node(1, description="x", trainable=True)
-    assert x.description == "[ParameterNode] x"
+    assert x.description == "x"
+    assert x._description == "[ParameterNode] x"
 
     x = node(1, trainable=True)
-    assert x.description == "[ParameterNode] This is a ParameterNode in a computational graph."
+    assert x.description == "type: <class 'int'>"
+    assert x._description == "[ParameterNode] type: <class 'int'>"
 
 
 def test_iterating_numpy_array():

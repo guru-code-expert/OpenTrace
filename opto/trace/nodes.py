@@ -802,7 +802,7 @@ class Node(AbstractNode[T]):
         """
 
         if description == "" or description is None:
-            description = f"[Node] Data type: {type(value)}."
+            description = f"[Node] type: {type(value)}"
 
         matched = re.match(r"^\[([^\[\]]+)\]", description)
         if not matched:
@@ -840,6 +840,11 @@ class Node(AbstractNode[T]):
         # return self._description
         # remove the operator type from the description
         return re.sub(r"^\[([^\[\]]+)\]", "", self._description).strip()
+    
+    @property
+    def op_name(self):
+        """The operator type of the node, extracted from the description."""
+        return get_op_name(self._description)
 
     @property
     def info(self):
@@ -1014,7 +1019,7 @@ class Node(AbstractNode[T]):
                         # Plot the edge from parent to node
                         # Bypass chain of identity operators (for better visualization)
                         while (
-                            get_op_name(parent.description) in IDENTITY_OPERATORS
+                            parent.op_name in IDENTITY_OPERATORS
                         ) and simple_visualization:
                             assert (
                                 len(parent.parents) == 1
@@ -2000,14 +2005,12 @@ class ParameterNode(Node[T]):
         *,
         name=None,
         trainable=True,
-        description="[ParameterNode] This is a ParameterNode in a computational graph.",
+        description=None,
         projections=None,  # a list of Projection
         info=None,
     ) -> None:
         if description is None or description == "":
-            description = (
-                "[ParameterNode] This is a ParameterNode in a computational graph."
-            )
+            description = f"[ParameterNode] type: {type(value)}"          
 
         matched = re.match(r"^\[([^\[\]]+)\]", description)
         if not matched:
