@@ -8,6 +8,7 @@ def test_json_keys():
     """
     Test that the OptoPrimeV2 class correctly initializes with json_keys.
     """
+    trace.GRAPH.clear()
     param = trace.node(1, trainable=True)
 
     def callable(messages,  **kwargs): 
