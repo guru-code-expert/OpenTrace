@@ -4,44 +4,10 @@ from typing import Union
 from opto import trace
 from opto.trainer.algorithms.algorithm import AlgorithmBase
 from opto.trainer.loader import DataLoader
-from opto.trainer.utils import async_run
+from opto.trainer.utils import batch_run, async_run
 from opto.optimizers.utils import print_color
+from opto.trainer.evaluators import evaluate
 
-
-def evaluate(agent, guide, inputs, infos, min_score=None, num_threads=None, description=None):
-    """ Evaluate the agent on the inputs and return the scores
-
-    Args:
-        agent: The agent to evaluate
-        guide: The guide to use for evaluation
-        inputs: List of inputs to evaluate on
-        infos: List of additional information for each input
-        min_score: Minimum score to return when an exception occurs
-        num_threads: Maximum number of threads to use for parallel evaluation
-        description: Description to display in the progress bar
-    """
-
-    def evaluate_single(i):
-        try:
-            output = agent(inputs[i]).data
-            score = guide.metric(inputs[i], output, infos[i])
-        except:
-            score = min_score
-        return score
-
-    N = len(inputs)
-    assert len(inputs) == len(infos), "Inputs and infos must have the same length"
-    # Use asyncio if num_threads is not None and > 1
-    use_asyncio = num_threads is not None and num_threads > 1
-    if use_asyncio:
-        # Use provided description or generate a default one
-        eval_description = description or f"Evaluating {N} examples"
-        scores = async_run([evaluate_single] * N, [(i,) for i in range(N)],
-                          max_workers=num_threads,
-                          description=eval_description) # list of tuples
-    else:
-        scores = [evaluate_single(i) for i in range(N)]
-    return scores
 
 def standard_optimization_step(agent, x, guide, info, min_score=0):
     """ Forward and compute feedback.
@@ -93,6 +59,7 @@ class Minibatch(AlgorithmBase):
               batch_size: int = 1,  # batch size for updating the agent
               test_dataset = None,  # dataset of (x, info) pairs to evaluate the agent
               eval_frequency: int = 1,  # frequency of evaluation
+              num_eval_samples: int = 1,  # number of samples to use to evaluate each input
               log_frequency: Union[int, None] = None,  # frequency of logging
               save_frequency: Union[int, None] = None,  # frequency of saving the agent
               save_path: str = "checkpoints/agent.pkl",  # path to save the agent
@@ -111,12 +78,13 @@ class Minibatch(AlgorithmBase):
         log_frequency = log_frequency or eval_frequency  # frequency of logging (default to eval_frequency)
         num_threads = num_threads or self.num_threads  # Use provided num_threads or fall back to self.num_threads
         test_dataset = test_dataset or train_dataset  # default to train_dataset if test_dataset is not provided
-        use_asyncio = self._use_asyncio(num_threads)
+        self.num_eval_samples = num_eval_samples  # number of samples to use to evaluate each input
 
         # Evaluate the agent before learning
         if eval_frequency > 0:
             test_score = self.evaluate(self.agent, guide, test_dataset['inputs'], test_dataset['infos'],
                           min_score=min_score, num_threads=num_threads,
+                          num_samples=self.num_eval_samples,
                           description=f"Evaluating agent (iteration {self.n_iters})")  # and log
             self.logger.log('Average test score', test_score, self.n_iters, color='green')
 
@@ -136,13 +104,8 @@ class Minibatch(AlgorithmBase):
                 backup_dict = {p: copy.deepcopy(p.data) for p in self.agent.parameters()}
 
                 # Forward the agent on the inputs and compute the feedback using the guide
-                if use_asyncio: # Run forward asynchronously
-                    outputs = async_run([self.forward]*len(xs),
-                                       [(self.agent, x, guide, info) for x, info in zip(xs, infos)],
-                                       max_workers=num_threads,
-                                       description=f"Forward pass (batch size: {len(xs)})")  # async forward
-                else: # Run forward sequentially
-                    outputs = [self.forward(self.agent, x, guide, info) for x, info in zip(xs, infos) ]
+                forward = batch_run(max_workers=num_threads, description=f"Forward pass (batch size: {len(xs)})")(self.forward)
+                outputs = forward(self.agent, xs, guide, infos)
 
                 # Update the agent
                 score = self.update(outputs, verbose=verbose, num_threads=num_threads, **kwargs)
@@ -161,6 +124,7 @@ class Minibatch(AlgorithmBase):
                 if test_dataset is not None and self.n_iters % eval_frequency == 0:
                     test_score = self.evaluate(self.agent, guide, test_dataset['inputs'], test_dataset['infos'],
                                   min_score=min_score, num_threads=num_threads,
+                                  num_samples=self.num_eval_samples,
                                   description=f"Evaluating agent (iteration {self.n_iters})")  # and log
                     self.logger.log('Average test score', test_score, self.n_iters, color='green')
 
@@ -180,11 +144,11 @@ class Minibatch(AlgorithmBase):
 
         return train_scores, test_score
 
-    def evaluate(self, agent, guide, xs, infos, min_score=None, num_threads=None, description=None):
+    def evaluate(self, agent, guide, xs, infos, min_score=None, num_samples=1, num_threads=None, description=None):
         """ Evaluate the agent on the given dataset. """
         num_threads = num_threads or self.num_threads  # Use provided num_threads or fall back to self.num_threads
         test_scores = evaluate(agent, guide, xs, infos, min_score=min_score, num_threads=num_threads,
-                              description=description)
+                               num_samples=num_samples, description=description)
         if all([s is not None for s in test_scores]):
             return np.mean(test_scores)
 
@@ -204,6 +168,7 @@ class Minibatch(AlgorithmBase):
         num_threads = num_threads or self.num_threads  # Use provided num_threads or fall back to self.num_threads
         new_score = self.evaluate(self.agent, guide, xs, infos, num_threads=num_threads,
                                  description=f"Checking improvement (iteration {self.n_iters})",
+                                 num_samples=self.num_eval_samples,
                                  *args, **kwargs)  # evaluate the updated agent
         if new_score is None or new_score <= current_score - threshold:
             print_color(f"Update rejected: Current score {current_score}, New score {new_score}", 'red')
@@ -343,15 +308,13 @@ class BasicSearchAlgorithm(MinibatchAlgorithm):
         # Generate different proposals
         step_kwargs = dict(bypassing=True, verbose='output' if verbose else False)  # we don't print the inner full message
         step_kwargs.update(kwargs)  # update with additional kwargs if provided
-        use_asyncio = self._use_asyncio()
-        if use_asyncio:
-            update_dicts = async_run([super().optimizer_step]*self.num_proposals,
-                                    kwargs_list=[step_kwargs] * self.num_proposals,
-                                    max_workers=num_threads,
-                                    description=f"Generating {self.num_proposals} proposals")  # async step
-        else:
-            update_dicts = [self.optimizer.step(**step_kwargs) for _ in range(self.num_proposals)]
 
+        # Use aysnc_run to run the optimizer_step in parallel
+        # NOTE optimizer_step is coupled via async_run
+        update_dicts = async_run([super().optimizer_step]*self.num_proposals,
+                                kwargs_list=[step_kwargs] * self.num_proposals,
+                                max_workers=num_threads,
+                                description=f"Generating {self.num_proposals} proposals")  # async step
         # Validate the proposals
         candidates = []
         backup_dict = {p: copy.deepcopy(p.data) for p in self.agent.parameters()}  # backup the current value
