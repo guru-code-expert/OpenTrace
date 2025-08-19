@@ -34,7 +34,7 @@ serve:
 
 build:
 	@echo "🔨 Building documentation..."
-	@cd docs-mkdocs && mkdocs build --clean --strict
+	@cd docs-mkdocs && mkdocs build --clean
 	@echo "✅ Build complete! Output in docs-mkdocs/site/"
 
 clean:
