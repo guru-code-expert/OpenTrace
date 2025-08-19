@@ -199,3 +199,65 @@
   color: var(--ot-yellow);
   font-weight: 600;
 }
+
+/* Header spacing improvements - DSPy inspired */
+.md-header {
+  height: 3rem;
+  box-shadow: 0 0 0.2rem rgba(0, 0, 0, 0.1), 0 0.2rem 0.4rem rgba(0, 0, 0, 0.2);
+}
+
+.md-header__inner {
+  padding: 0 0.8rem;
+  height: 3rem;
+}
+
+/* Search button spacing */
+.md-search {
+  padding: 0.2rem 0;
+}
+
+.md-header__option {
+  margin: 0 0.2rem;
+}
+
+/* Better search overlay positioning */
+.md-search__overlay {
+  background-color: rgba(0, 0, 0, 0.54);
+}
+
+.md-search__inner {
+  margin-top: 3.2rem;
+}
+
+/* Navigation tabs spacing */
+.md-tabs {
+  height: 2.4rem;
+}
+
+.md-tabs__inner {
+  padding: 0 0.8rem;
+}
+
+.md-tabs__list {
+  height: 2.4rem;
+}
+
+.md-tabs__item {
+  height: 2.4rem;
+}
+
+.md-tabs__link {
+  padding: 0.6rem 0.8rem;
+  font-size: 0.8rem;
+}
+
+/* Main content spacing */
+.md-main__inner {
+  padding-top: 1rem;
+}
+
+/* Content container spacing */
+.md-content__inner {
+  padding-top: 1.2rem;
+  padding-bottom: 1.2rem;
+}
