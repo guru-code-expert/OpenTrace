@@ -62,7 +62,7 @@ publish:
 	@$(MAKE) build
 	@echo ""
 	@echo "💾 Committing changes..."
-	@git add .
+	@git add docs-mkdocs/ .github/workflows/docs.yml Makefile
 	@if git diff --staged --quiet; then \
 		echo "ℹ️  No changes to commit"; \
 	else \

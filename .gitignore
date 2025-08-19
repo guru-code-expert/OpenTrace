@@ -169,3 +169,15 @@ OAI_CONFIG_LIST
 
 # jupyter book API output
 docs/api/*
+
+# MLflow tracking data
+mlruns/
+mlruns.db
+*.db
+
+# MkDocs build output (site/ is generated, not tracked)
+docs-mkdocs/site/
+
+# Local test notebooks and temp files
+tests/optimizer_*.ipynb
+examples/mlflow_autolog_example.py
