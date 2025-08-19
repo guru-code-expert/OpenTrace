@@ -63,6 +63,23 @@ plugins:
   - mkdocs-jupyter:
       execute: false
       include_source: True
+  - gen-files:
+      scripts:
+        - gen_ref_pages.py
+  - literate-nav:
+      nav_file: SUMMARY.md
+  - section-index
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [../..] # Path to the root directory containing opto package
+          options:
+            docstring_style: numpy
+            show_source: false
+            members_order: source
+            separate_signature: true
+            merge_init_into_class: true
+            show_signature_annotations: true
 
 nav:
   - Get Started: index.md
@@ -92,7 +109,9 @@ nav:
     - Robotics Examples:
       - Metaworld: examples/robotics/metaworld.ipynb
   - FAQ: faq/faq.md
-  - API Reference: api.md
+  - API Reference: 
+    - api/index.md
+    - API: api/ # This will be auto-populated by gen-files
 
 extra:
   analytics:

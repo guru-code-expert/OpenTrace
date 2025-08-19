@@ -123,6 +123,19 @@ docs-mkdocs/
 └── site/              # Built documentation (auto-generated)
 ```
 
+## 📖 API Documentation
+
+The API documentation is automatically generated from Python docstrings using:
+- **mkdocstrings** - Renders docstrings into documentation pages  
+- **gen_ref_pages.py** - Scans the `opto` package and creates API structure
+- **Auto-generation** - Runs automatically on `make serve`, `make build`, and `make publish`
+
+No manual steps needed - just update your docstrings in the source code and the API docs will reflect the changes! The generated API documentation includes:
+- Complete module reference for `opto.trace`, `opto.optimizers`, `opto.trainer`, etc.
+- Function signatures with type hints
+- Class documentation with methods and attributes
+- Cross-references between related components
+
 ## 🎨 Customization
 
 - **Colors**: Defined in `docs/stylesheets/extra.css`
