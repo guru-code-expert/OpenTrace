@@ -65,7 +65,7 @@ save:
 	@if git diff --staged --quiet; then \
 		echo "ℹ️  No changes to commit"; \
 	else \
-		git commit -m "Save documentation progress\n\n🤖 Generated with [Claude Code](https://claude.ai/code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>"; \
+		git commit -m "Save documentation progress"; \
 	fi
 	@echo ""
 	@echo "⬆️  Pushing to docs-dev..."
@@ -100,7 +100,7 @@ publish:
 	@if git diff --staged --quiet; then \
 		echo "ℹ️  No changes to commit"; \
 	else \
-		git commit -m "Update documentation\n\n🤖 Generated with [Claude Code](https://claude.ai/code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>"; \
+		git commit -m "Update documentation"; \
 	fi
 	@echo ""
 	@echo "⬆️  Pushing docs-dev to remote..."
