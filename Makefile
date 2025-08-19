@@ -1,4 +1,4 @@
-.PHONY: help serve build clean publish status switch-dev switch-prod install
+.PHONY: help serve build clean save publish status switch-dev switch-prod install
 
 help:
 	@echo "OpenTrace Documentation Makefile"
@@ -8,7 +8,8 @@ help:
 	@echo "  make build          - Build documentation locally"
 	@echo "  make clean          - Clean build artifacts"
 	@echo ""
-	@echo "📦 Publishing Commands:"
+	@echo "💾 Save & Publishing Commands:"
+	@echo "  make save           - Save progress to docs-dev branch (no deployment)"
 	@echo "  make publish        - Publish documentation to GitHub Pages"
 	@echo "  make status         - Show current branch and git status"
 	@echo ""
@@ -22,7 +23,8 @@ help:
 	@echo "📝 Workflow:"
 	@echo "  1. Work on docs-dev branch: make switch-dev"
 	@echo "  2. Test locally: make serve"
-	@echo "  3. When ready to publish: make publish"
+	@echo "  3. Save progress: make save"
+	@echo "  4. When ready to publish: make publish"
 
 serve:
 	@echo "🚀 Starting local development server..."
@@ -39,6 +41,38 @@ clean:
 	@echo "🧹 Cleaning build artifacts..."
 	@rm -rf docs-mkdocs/site/
 	@echo "✅ Clean complete!"
+
+save:
+	@echo "💾 Saving progress to docs-dev branch..."
+	@echo ""
+	@echo "Current branch: $$(git branch --show-current)"
+	@echo "Current status:"
+	@git status --porcelain
+	@echo ""
+	@if [ "$$(git branch --show-current)" != "docs-dev" ]; then \
+		echo "⚠️  Warning: You're not on docs-dev branch!"; \
+		echo "   Current branch: $$(git branch --show-current)"; \
+		echo "   Recommended: make switch-dev first"; \
+		echo ""; \
+		read -p "Continue anyway? (y/N): " confirm; \
+		if [ "$$confirm" != "y" ] && [ "$$confirm" != "Y" ]; then \
+			echo "❌ Save cancelled"; \
+			exit 1; \
+		fi; \
+	fi
+	@echo "💾 Committing changes..."
+	@git add docs-mkdocs/ .github/workflows/docs.yml Makefile
+	@if git diff --staged --quiet; then \
+		echo "ℹ️  No changes to commit"; \
+	else \
+		git commit -m "Save documentation progress\n\n🤖 Generated with [Claude Code](https://claude.ai/code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>"; \
+	fi
+	@echo ""
+	@echo "⬆️  Pushing to docs-dev..."
+	@git push origin docs-dev
+	@echo ""
+	@echo "✅ Progress saved to docs-dev branch!"
+	@echo "🔄 Use 'make publish' when ready to deploy to production"
 
 publish:
 	@echo "📦 Publishing documentation to GitHub Pages..."
