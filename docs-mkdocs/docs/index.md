@@ -1,6 +1,7 @@
 ---
 hide:
   - navigation
+# Updated for GitHub Actions deployment
 ---
 
 # OpenTrace
