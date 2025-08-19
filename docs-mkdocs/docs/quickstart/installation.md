@@ -66,7 +66,7 @@ print(result)  # Output: Hello, World!
 
 - **New to OpenTrace?** Check out our [Quick Start Guide](quick_start.ipynb)
 - **Want to see examples?** Explore our [Examples](../examples/basic/greeting.ipynb) section
-- **Need help?** Visit our [FAQ](../faq/faq.md) or [API Reference](../api.md)
+- **Need help?** Visit our [FAQ](../faq/faq.md) or [API Reference](../api/index.md)
 
 [:material-rocket-launch: Start with Quick Start](quick_start.ipynb){ .md-button .md-button--primary }
 [:material-book-open: View Examples](../examples/basic/greeting.ipynb){ .md-button }
