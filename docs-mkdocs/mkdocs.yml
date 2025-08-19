@@ -1,0 +1,108 @@
+site_name: OpenTrace
+site_description: OpenTrace - Automated AI Agent Optimization
+site_author: Ching-An Cheng, Allen Nie, Adith Swaminathan
+site_url: https://agentopt.github.io/OpenTrace
+repo_name: AgentOpt/OpenTrace
+repo_url: https://github.com/AgentOpt/OpenTrace
+edit_uri: edit/main/docs-mkdocs/docs/
+
+theme:
+  name: material
+  logo: images/github_logo.png
+  favicon: images/github_logo.png
+  palette:
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Circular Std, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif
+    code: JetBrains Mono, Consolas, Monaco, monospace
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - navigation.indexes
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.action.edit
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mkdocs-jupyter:
+      execute: false
+      include_source: True
+
+nav:
+  - Get Started: index.md
+  - New in v0.2: new-in-v02.md
+  - Learn:
+    - Installation: quickstart/installation.md
+    - Quick Start: quickstart/quick_start.ipynb
+    - Advanced Quick Start: quickstart/quick_start_2.ipynb
+    - VirtualHome: quickstart/virtualhome.md
+  - Tutorials:
+    - Basic Tutorial: tutorials/basic_tutorial.ipynb
+    - Optimization Tutorial: tutorials/optimization_tutorial.ipynb
+    - Error Handling Tutorial: tutorials/error_handling_tutorial.ipynb
+    - Custom Optimizers: tutorials/custom_optimizers.ipynb
+    - Minibatch: tutorials/minibatch.ipynb
+    - Trainers: tutorials/trainers.ipynb
+  - Examples:
+    - Basic Examples:
+      - Greeting: examples/basic/greeting.ipynb
+    - Agent Examples:
+      - Battleship: examples/game/battleship.ipynb
+      - Negotiation Arena: examples/game/negotiation_arena.ipynb
+    - NLP Examples:
+      - BigBench Hard: examples/nlp/bigbench_hard.ipynb
+    - Numerical Examples:
+      - Numerical Optimization: examples/numerical/numerical_optimization.ipynb
+    - Robotics Examples:
+      - Metaworld: examples/robotics/metaworld.ipynb
+  - FAQ: faq/faq.md
+  - API Reference: api.md
+
+extra:
+  analytics:
+    provider: google
+    property: G-C3WH29YM90
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/AgentOpt/OpenTrace
+
+extra_css:
+  - stylesheets/extra.css
+
+copyright: Copyright &copy; 2025 AgentOpt Team
