@@ -37,6 +37,12 @@
   --md-primary-fg-color: var(--ot-yellow);
   --md-accent-fg-color: var(--ot-cerulean);
   --md-header-bg-color: var(--ot-black);
+  --md-header-fg-color: white;
+}
+
+/* Dark mode header title - make it white */
+[data-md-color-scheme="slate"] .md-header__title {
+  color: white !important;
 }
 
 /* Custom button styles - Material homepage inspired */
@@ -79,7 +85,7 @@
 
 /* Navigation tabs */
 .md-tabs {
-  background-color: var(--ot-deep-sea);
+  background-color: var(--md-primary-fg-color);
 }
 
 .md-tabs__list {
@@ -200,9 +206,30 @@
   font-weight: 600;
 }
 
-/* Header spacing improvements - DSPy inspired */
+/* Make site logo bigger - more specific targeting */
+.md-logo img {
+  height: 2.4rem !important;
+  width: auto !important;
+  max-height: 2.4rem !important;
+}
+
+.md-header .md-logo {
+  padding: 0.2rem !important;
+}
+
+.md-nav .md-logo {
+  padding: 0.2rem !important;
+}
+
+/* Force logo size in all contexts */
+img[src*="github_logo.png"] {
+  height: 2.4rem !important;
+  width: auto !important;
+}
+
+/* Header spacing improvements */
 .md-header {
-  height: 3rem;
+  height: 3.5rem;
   box-shadow: 0 0 0.2rem rgba(0, 0, 0, 0.1), 0 0.2rem 0.4rem rgba(0, 0, 0, 0.2);
 }
 
@@ -211,27 +238,31 @@
   height: 3rem;
 }
 
-/* Search button spacing */
-.md-search {
-  padding: 0.2rem 0;
+.md-header .md-ellipsis {
+  font-size: 1.2rem;
 }
 
-.md-header__option {
+/* Search button spacing */
+/* .md-search {
+  padding: 0.2rem 0;
+} */
+
+/* .md-header__option {
   margin: 0 0.2rem;
-}
+} */
 
 /* Better search overlay positioning */
-.md-search__overlay {
+/* .md-search__overlay {
   background-color: rgba(0, 0, 0, 0.54);
 }
 
 .md-search__inner {
   margin-top: 3.2rem;
-}
+} */
 
 /* Navigation tabs spacing */
 .md-tabs {
-  height: 2.4rem;
+  height: 2.5rem;
 }
 
 .md-tabs__inner {
@@ -239,16 +270,17 @@
 }
 
 .md-tabs__list {
-  height: 2.4rem;
+  height: 2rem;
 }
 
 .md-tabs__item {
-  height: 2.4rem;
+  height: 2rem;
 }
 
 .md-tabs__link {
-  padding: 0.6rem 0.8rem;
-  font-size: 0.8rem;
+  padding: 0.4rem 0;
+  margin: 0.4rem 0 0.4rem;
+  font-size: 0.7rem;
 }
 
 /* Main content spacing */
@@ -260,4 +292,17 @@
 .md-content__inner {
   padding-top: 1.2rem;
   padding-bottom: 1.2rem;
+}
+
+/* Header source (GitHub link) spacing */
+.md-header__source {
+  margin-left: 1rem;
+  margin-right: 0px;
+  text-align: right;
+}
+
+/* GitHub source icon and repository spacing */
+[dir="ltr"] .md-source__icon + .md-source__repository {
+  margin-left: -2rem;
+  padding-left: 2rem;
 }

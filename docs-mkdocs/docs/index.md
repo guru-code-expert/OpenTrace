@@ -6,6 +6,9 @@ hide:
 
 # OpenTrace
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/AgentOpt/Trace/blob/experimental/docs/examples/basic/greeting.ipynb)
+[![GitHub](https://img.shields.io/github/stars/AgentOpt/OpenTrace?style=social)](https://github.com/AgentOpt/OpenTrace)
+
 **OpenTrace is an open-source, open-governance Python library for tracing and optimizing workflows using LLM-powered generative optimizers, maintained by the exact same group of developers for Trace.**
 
 A typical LLM agent workflow is defined by a sequence of operations, which usually involve user-written Python **programs**, **instructions** to LLMs (e.g.,
@@ -50,9 +53,6 @@ Finally, the user can optimize the entire program, such as by updating the LLM i
 }
 .image-hover:hover figcaption { opacity: 1; }
 </style>
-
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/AgentOpt/Trace/blob/experimental/docs/examples/basic/greeting.ipynb)
-[![GitHub](https://img.shields.io/github/stars/AgentOpt/OpenTrace?style=social)](https://github.com/AgentOpt/OpenTrace)
 
 <div class="grid cards" markdown>
 
