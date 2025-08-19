@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block tabs %}
+  {{ super() }}
+  {% if page.meta and page.meta.template != "home.html" %}
+    <div class="md-nav-right">
+      <a href="{{ 'faq/faq/' | url }}">FAQ</a>
+      <a href="{{ 'api/' | url }}">API Reference</a>
+    </div>
+  {% endif %}
+{% endblock %}

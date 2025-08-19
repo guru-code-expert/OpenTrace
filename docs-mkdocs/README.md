@@ -16,7 +16,74 @@ This directory contains the MkDocs Material documentation for OpenTrace.
 - **Purpose**: Public documentation that users see
 - **Features**: Deployed to GitHub Pages, production analytics
 
-## 🚀 Deployment Process
+## 🚀 Quick Start with Makefile
+
+The easiest way to work with OpenTrace documentation is using the included Makefile commands from the project root:
+
+### ⚡ Essential Commands
+```bash
+# Start local development server
+make serve
+
+# Publish documentation (full deployment pipeline)
+make publish
+
+# See all available commands
+make help
+```
+
+### 📋 Complete Command Reference
+```bash
+# 🚀 Development Commands
+make serve          # Start local server (http://127.0.0.1:8000)
+make build          # Build documentation locally  
+make clean          # Clean build artifacts
+
+# 📦 Publishing Commands
+make publish        # One-command publish to GitHub Pages
+make status         # Show current branch and git status
+
+# 🌿 Branch Management
+make switch-dev     # Switch to docs-dev branch (staging)
+make switch-prod    # Switch to docs-prod branch (production)  
+
+# 🔧 Setup Commands
+make install        # Install documentation dependencies
+make help           # Display help with all commands
+```
+
+### 🎯 Recommended Workflow
+```bash
+# 1. Start on development branch
+make switch-dev
+
+# 2. Start local server for live preview
+make serve          # Visit http://127.0.0.1:8000
+
+# 3. Make your changes...
+# (edit files in docs-mkdocs/docs/)
+
+# 4. When ready, publish everything
+make publish        # Handles entire deployment pipeline automatically
+```
+
+## 🛠️ Manual Development (Alternative)
+
+If you prefer working directly with MkDocs commands:
+
+### Setup
+```bash
+cd docs-mkdocs
+make install        # or: pip install mkdocs-material mkdocs-jupyter
+```
+
+### Serve Locally
+```bash
+cd docs-mkdocs
+mkdocs serve        # Visit http://127.0.0.1:8000/
+```
+
+### Manual Deployment Process
 
 ### 1. Development Work
 ```bash
@@ -39,25 +106,6 @@ git push origin docs-dev
 git checkout docs-prod
 git merge docs-dev
 git push origin docs-prod
-```
-
-## 🛠️ Local Development
-
-### Setup
-```bash
-cd docs-mkdocs
-pip install mkdocs-material mkdocs-jupyter
-```
-
-### Serve Locally
-```bash
-mkdocs serve
-# Visit http://127.0.0.1:8000/
-```
-
-### Build
-```bash
-mkdocs build --clean --strict
 ```
 
 ## 📁 Structure

@@ -1,0 +1,201 @@
+/* OpenTrace Custom Brand Colors */
+:root {
+  /* OpenTrace Brand Colors */
+  --ot-yellow: #ffc202;      /* Trace Yellow - central color */
+  --ot-cerulean: #359ffb;    /* Cerulean */
+  --ot-deep-sea: #1a4e7b;    /* Deep Sea */
+  --ot-laser: #ff3926;       /* Laser Beam */
+  --ot-black: #000000;       /* Black */
+  
+  /* Material Design Custom Primary Colors */
+  --md-primary-fg-color: var(--ot-deep-sea);
+  --md-primary-fg-color--light: var(--ot-cerulean);
+  --md-primary-fg-color--dark: var(--ot-black);
+  --md-accent-fg-color: var(--ot-yellow);
+  --md-accent-fg-color--transparent: rgba(255, 194, 2, 0.1);
+  
+  /* Header and Navigation */
+  --md-header-bg-color: var(--ot-deep-sea);
+  --md-header-fg-color: white;
+  
+  /* Links and Interactive Elements */
+  --md-typeset-a-color: var(--ot-cerulean);
+  --md-typeset-a-color--hover: var(--ot-deep-sea);
+  
+  /* Buttons */
+  --md-typeset-btn-color: white;
+  --md-typeset-btn-bg-color: var(--ot-cerulean);
+  --md-typeset-btn-bg-color--hover: var(--ot-deep-sea);
+  
+  /* Code blocks */
+  --md-code-bg-color: #f8f9fa;
+  --md-code-fg-color: var(--ot-black);
+}
+
+/* Dark mode adjustments */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: var(--ot-yellow);
+  --md-accent-fg-color: var(--ot-cerulean);
+  --md-header-bg-color: var(--ot-black);
+}
+
+/* Custom button styles - Material homepage inspired */
+.md-typeset .md-button {
+  border: .1rem solid;
+  border-radius: .1rem;
+  border-color: var(--ot-cerulean);
+  background-color: var(--ot-cerulean);
+  color: white;
+  cursor: pointer;
+  display: inline-block;
+  font-weight: 700;
+  padding: .625em 2em;
+  margin-right: .5rem;
+  margin-top: .5rem;
+  transition: color 125ms, background-color 125ms, border-color 125ms;
+}
+
+.md-typeset .md-button:hover {
+  background-color: var(--ot-deep-sea);
+  border-color: var(--ot-deep-sea);
+  color: white;
+}
+
+.md-typeset .md-button--primary {
+  background-color: var(--ot-yellow);
+  border-color: var(--ot-yellow);
+  border-width: 0;
+  color: var(--ot-black);
+  font-weight: 700;
+  margin-right: .5rem;
+  margin-top: .5rem;
+}
+
+.md-typeset .md-button--primary:hover {
+  background-color: var(--ot-laser);
+  border-color: var(--ot-laser);
+  color: white;
+}
+
+/* Navigation tabs */
+.md-tabs {
+  background-color: var(--ot-deep-sea);
+}
+
+.md-tabs__list {
+  display: flex;
+  align-items: center;
+}
+
+/* Push the last two items (FAQ and API Reference) to the right */
+.md-tabs__item:nth-last-child(2) {
+  margin-left: auto;
+}
+
+.md-tabs__item:nth-last-child(1) {
+  margin-left: 0.3rem;
+}
+
+.md-tabs__link {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.md-tabs__link--active {
+  color: var(--ot-yellow);
+}
+
+/* Card styling */
+.md-typeset .grid.cards > * {
+  border: 1px solid rgba(53, 159, 251, 0.2);
+  transition: all 0.3s ease;
+}
+
+.md-typeset .grid.cards > *:hover {
+  border-color: var(--ot-cerulean);
+  box-shadow: 0 4px 8px rgba(53, 159, 251, 0.2);
+  transform: translateY(-2px);
+}
+
+/* Admonition colors */
+.md-typeset .admonition.tip {
+  border-color: var(--ot-yellow);
+}
+
+.md-typeset .admonition.tip > .admonition-title {
+  background-color: rgba(255, 194, 2, 0.1);
+  border-color: var(--ot-yellow);
+}
+
+.md-typeset .admonition.info {
+  border-color: var(--ot-cerulean);
+}
+
+.md-typeset .admonition.info > .admonition-title {
+  background-color: rgba(53, 159, 251, 0.1);
+  border-color: var(--ot-cerulean);
+}
+
+.md-typeset .admonition.warning {
+  border-color: var(--ot-laser);
+}
+
+.md-typeset .admonition.warning > .admonition-title {
+  background-color: rgba(255, 57, 38, 0.1);
+  border-color: var(--ot-laser);
+}
+
+/* Search highlighting */
+.md-search-result__teaser mark {
+  background-color: var(--ot-yellow);
+  color: var(--ot-black);
+}
+
+/* Footer */
+.md-footer {
+  background-color: var(--ot-deep-sea);
+}
+
+.md-footer-meta {
+  background-color: var(--ot-black);
+}
+
+/* Font imports */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* Try to load Circular Std from common CDN sources */
+@import url('https://fonts.googleapis.com/css2?family=Circular+Std:wght@300;400;500;600;700&display=swap');
+
+/* Font face declarations for Circular Std (fallback method) */
+@font-face {
+  font-family: 'Circular Std';
+  src: url('https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/inter/Inter-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Primary font stack with multiple fallbacks */
+.md-typeset {
+  font-family: "Circular Std", "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-print-color-adjust: exact;
+  color-adjust: exact;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+/* Ensure headings also use the custom font */
+.md-typeset h1, 
+.md-typeset h2, 
+.md-typeset h3, 
+.md-typeset h4, 
+.md-typeset h5, 
+.md-typeset h6 {
+  font-family: "Circular Std", "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Logo adjustments for brand consistency */
+.md-header__title {
+  color: var(--ot-yellow);
+  font-weight: 600;
+}

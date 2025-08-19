@@ -1,0 +1,10 @@
+execution_duration_ms: 227
+request_preview: 'null'
+request_time: '2025-08-18T19:34:18.561Z'
+response_preview: '"MessageNode: (my_complex_function:0, dtype=<class ''int''>, data=8)"'
+state: OK
+trace_id: tr-5b9e77332e44dd6475980132bf4b3bec
+trace_location:
+  mlflow_experiment:
+    experiment_id: '0'
+  type: MLFLOW_EXPERIMENT
