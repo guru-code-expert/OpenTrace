@@ -86,7 +86,11 @@ plugins:
 
 nav:
   - Get Started: index.md
-  - New in v0.2: new-in-v02.md
+  - New in v0.2:
+    - new-in-v02/index.md
+    - Introducing Trainer: new-in-v02/trainer.md
+    - Asynchronous: new-in-v02/async.md
+    - MLFlow Integration: new-in-v02/mlflow.md
   - Learn:
     - Installation: quickstart/installation.md
     - Quick Start: quickstart/quick_start.ipynb
