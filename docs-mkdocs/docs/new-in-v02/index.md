@@ -50,7 +50,7 @@ except trace.OptimizationError as e:
 
 ## 🔄 Migration Guide
 
-Upgrading from v0.1? Most code should work without changes, but check our [migration guide](quickstart/installation.md) for detailed instructions.
+Upgrading from v0.1? Most code should work without changes, but check our [migration guide](../quickstart/installation.md) for detailed instructions.
 
 !!! warning "Breaking Changes"
     - `trace.old_method()` is now `trace.new_method()`
@@ -67,4 +67,4 @@ Stay tuned for v0.3 features:
 
 ---
 
-Ready to explore these new features? Check out our [Learn OpenTrace](quickstart/installation.md) section to get started!
+Ready to explore these new features? Check out our [Learn OpenTrace](../quickstart/installation.md) section to get started!
