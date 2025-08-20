@@ -208,9 +208,9 @@
 
 /* Make site logo bigger - more specific targeting */
 .md-logo img {
-  height: 2.4rem !important;
+  height: 2rem !important;
   width: auto !important;
-  max-height: 2.4rem !important;
+  max-height: 2rem !important;
 }
 
 .md-header .md-logo {
@@ -223,7 +223,7 @@
 
 /* Force logo size in all contexts */
 img[src*="github_logo.png"] {
-  height: 2.4rem !important;
+  height: 2rem !important;
   width: auto !important;
 }
 
@@ -239,7 +239,7 @@ img[src*="github_logo.png"] {
 }
 
 .md-header .md-ellipsis {
-  font-size: 1.2rem;
+  font-size: 1rem;
 }
 
 /* Search button spacing */
