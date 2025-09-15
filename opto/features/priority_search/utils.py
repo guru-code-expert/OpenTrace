@@ -9,8 +9,7 @@ from opto.trainer.utils import async_run, batch_run
 from opto.optimizers.utils import print_color
 from opto.trainer.algorithms.basic_algorithms import Minibatch, Trainer, batchify
 from opto.trainer.loader import DataLoader
-from opto.features.priority_search.sampler import Sampler, RolloutsGraph
-import time
+from opto.features.priority_search.sampler import Sampler, BatchRollout
 
 # Some helper functions to convert between trace.Module and update_dict
 
@@ -45,7 +44,8 @@ def is_module_copy(a, b):
         _matched = []
         for p_b in parameters_b:
             _matched.append(is_node_copy(p_a, p_b))
-    np.array(matched)
+        matched.append(_matched)
+    matched = np.array(matched)
     if np.all(np.sum(matched, axis=1) == 1) and np.all(np.sum(matched, axis=0) == 1):
         return True
     return False
@@ -82,3 +82,4 @@ def create_module_from_update_dict(agent, update_dict):
     new_agent = copy.deepcopy(agent) #.copy()  # create a copy of the agent
     set_module_parameters(new_agent, update_dict)  # set the parameters of the new agent
     return new_agent  # return the new agent
+

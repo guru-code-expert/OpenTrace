@@ -10,7 +10,8 @@ from opto.trainer.utils import async_run
 from opto.trainer.algorithms.basic_algorithms import batchify
 from opto.features.priority_search.search_template import SearchTemplate, Samples, BatchRollout
 from opto.features.priority_search.utils import set_module_parameters, remap_update_dict, create_module_from_update_dict, is_module_copy
-
+from opto.features.priority_search.module_regressor import ModuleCandidateRegressor
+from opto.utils.auto_retry import retry_with_exponential_backoff
 
 class ModuleCandidate:
     """ A container used by PrioritySearch to store a candidate module as (its base module and update dictionary) and its statistics. """
@@ -27,14 +28,11 @@ class ModuleCandidate:
             stats (dict): A dictionary of statistics about the candidate.
         """
         assert isinstance(base_module, trace.Module), "base_module must be a trace.Module."
-        if update_dict is None:
-            # if no update_dict is provided, use the base_module's parameters as the update_dict
-            update_dict = {p: p.data for p in base_module.parameters()}
-        else:
+        if update_dict is not None:
             assert isinstance(optimizer, Optimizer), "optimizer must be an instance of Optimizer when update_dict is provided."
-        assert update_dict is not None, "update_dict must be provided."
+
         self.base_module = base_module
-        self.update_dict = update_dict
+        self.update_dict = update_dict if update_dict is not None else {}
         self.optimizer = optimizer  # the optimizer used to generate the update_dict; can be None, which indicates the base_module is used.
         self.update_dict = remap_update_dict(self.base_module, self.update_dict)
         self.rollouts = []  # list of dicts containing the rollout information (not BatchRollout, but a list of dicts)
@@ -103,7 +101,7 @@ class ModuleCandidate:
         """ Compute the score of the candidate based on the rollouts. """
         if not self.rollouts:
             return None
-        scores = [r['score'] for r in self.rollouts]
+        scores = [r['score'] for r in self.rollouts if r['score'] is not None]
         return np.mean(scores) if scores else None
 
     def compute_score_confidence(self, min_score, max_score, scaling_constant=1.0, total_trials=1):
@@ -213,8 +211,14 @@ class HeapMemory:
                 return p if p is not None else 0
             return max(self.memory, key=lambda x: _criterion(x))
 
+    def reorder_according_to_predicted_scores(self):
+        """ Reorder the heap memory according to the predicted scores. """
+        # Now all ModuleCandidate objects in the heap memory have predicted scores. Should modify the old score to the negative predicted scores, then use heapq.heapify to reorder the heap memory.
+        self.memory = [(-candidate.predicted_score, candidate) for _, candidate in self.memory]
+        heapq.heapify(self.memory)
+
 # TODO check saving and loading
-class PrioritySearch(SearchTemplate):
+class PrioritySearch_with_Regressor(SearchTemplate):
     """ A search algorithm that uses a priority queue to explore the parameter space and propose new candidates.
 
         It provides a scalable template for implementing search algorithms based on asynchronous generation, validation, and testing.
@@ -317,12 +321,10 @@ class PrioritySearch(SearchTemplate):
 
         self.ucb_exploration_constant = ucb_exploration_constant
         self._exploration_candidates = None  # This stores the latest candidates used for exploration
-        self._exploration_candidates_priority = None  # This stores the latest candidates' priorities used for exploration
         self._best_candidate = None  # This stores the latest best candidate used for exploitation
-        self._best_candidate_priority = None  # This stores the latest best candidate's priority used for exploitation
 
         self.memory = HeapMemory(size=memory_size)  # Initialize the heap memory with a size limit
-
+        self.regressor = ModuleCandidateRegressor(memory=self.memory) # Initialize the
 
         super().train(guide=guide,
                       train_dataset=train_dataset,
@@ -352,18 +354,27 @@ class PrioritySearch(SearchTemplate):
         # samples is None in the first iteration
         if samples is not None:
             # 1. Propose new parameters based on running LLM optimizers on the collected samples
-            candidates = self.propose(samples, verbose=verbose, **kwargs)  # List of ModuleCandidates
-            # 2. Validate the proposed parameters
+            
+            candidates = retry_with_exponential_backoff(
+                lambda: self.propose(samples, verbose=verbose, **kwargs),
+                max_retries=10,
+                base_delay=1.0,
+                operation_name="propose_new_parameters"
+            )  # List of ModuleCandidates
+            # # 2. Validate the proposed parameters
             validate_results = self.validate(candidates, samples, verbose=verbose, **kwargs)  # this updates the priority queue
-            # 3. Update the priority queue with the validation results
+            # # 3. Update the priority queue with the validation results
             self.update_memory(validate_results, verbose=verbose, **kwargs)  # samples are provided here in case candidates do not capture full information
+
         else:  # The first iteration.
             max_mem_size = self.memory.size if self.memory.size is not None else float('inf')
+            initial_update_dict = {p: copy.deepcopy(p.data) for p in self.agent.parameters()}
             while len(self.memory) < min(max_mem_size, self.num_candidates):
-                self.memory.push(self.max_score, ModuleCandidate(self.agent, optimizer=self.optimizer))  # Push the base agent as the first candidate (This gives the initialization of the priority queue)
+                self.memory.push(self.max_score, ModuleCandidate(self.agent, initial_update_dict, optimizer=self.optimizer))  # Push the base agent as the first candidate (This gives the initialization of the priority queue)
+        self.update_memory_with_regressor()
         # 4. Explore and exploit the priority queue
-        self._best_candidate, self._best_candidate_priority, info_exploit = self.exploit(verbose=verbose, **kwargs)  # get the best candidate (ModuleCandidate) from the priority queue
-        self._exploration_candidates, self._exploration_candidates_priority, info_explore = self.explore(verbose=verbose, **kwargs)  # List of ModuleCandidates
+        self._best_candidate, info_exploit = self.exploit(verbose=verbose, **kwargs)  # get the best candidate (ModuleCandidate) from the priority queue
+        self._exploration_candidates, info_explore = self.explore(verbose=verbose, **kwargs)  # List of ModuleCandidates
         # TODO Log information about the update
         info_log = {
             'n_iters': self.n_iters,  # number of iterations
@@ -451,7 +462,7 @@ class PrioritySearch(SearchTemplate):
         args_list = [(n,) for n in range(n_batches)]
         optimizers = async_run([_backward]*n_batches,  # run the optimizer step for each agent in parallel
                                  args_list=args_list,
-                                 max_workers=self.num_threads,  # use the number of threads specified in the class
+                                 max_workers=1000,  # use the number of threads specified in the class
                                  description=None)
         assert len(optimizers) == n_batches, "Number of optimizers must match number of batch rollouts."
         # need to copy optimizer for the n_proposals
@@ -462,7 +473,13 @@ class PrioritySearch(SearchTemplate):
         # For each optimizer, containing the backward feedback, we call it n_proposals times to get the proposed parameters.
         def _step(n):
             optimizer = optimizers[n]
-            update_dict = optimizer.step(verbose=verbose, num_threads=self.num_threads, bypassing=True, **kwargs)
+            
+            update_dict = retry_with_exponential_backoff(
+                lambda: optimizer.step(verbose=verbose, num_threads=self.num_threads, bypassing=True, **kwargs),
+                max_retries=10,
+                base_delay=1.0,
+                operation_name="optimizer_step"
+            )
             if not update_dict:  # if the optimizer did not propose any updates
                 return None # return None to indicate no updates were proposed
             # update_dict may only contain some of the parameters of the agent, we need to make sure it contains all the parameters
@@ -477,7 +494,7 @@ class PrioritySearch(SearchTemplate):
         args_list = [(n,) for n in range(n_batches*n_proposals)]
         update_dicts = async_run([_step]*n_batches*n_proposals,  # run the optimizer step for each agent in parallel
                                   args_list=args_list,
-                                  max_workers=self.num_threads,  # use the number of threads specified in the class
+                                  max_workers=1000,  # use the number of threads specified in the class
                                   description=f"Calling optimizers: Generating {n_proposals} proposals for each of {n_batches} batches",)
 
         # update_dicts is a list of dicts of length n_batches * n_proposals
@@ -507,21 +524,21 @@ class PrioritySearch(SearchTemplate):
 
         # The current batch of samples can be used to validate the exploration candidates
         validate_samples = copy.copy(samples)
+        # Xuanfei: I commented all these below, only use training samples.
+        # # Validate newly proposed candidates
+        # use_prev_batch = self.use_prev_batch  # when True, self.validate_sampler == self.train_sampler, and the current batch is used for validation
+        # candidate_agents = [c.get_module() for c in candidates]  # get the modules from the candidates
+        # validate_samples.add_samples(Samples(*self.validate_sampler.sample(candidate_agents,
+        #                                                         use_prev_batch=use_prev_batch,
+        #                                                         description_prefix='Validating newly proposed candidates: ')))  # list of BatchRollout objects
 
-        # Validate newly proposed candidates
-        use_prev_batch = self.use_prev_batch  # when True, self.validate_sampler == self.train_sampler, and the current batch is used for validation
-        candidate_agents = [c.get_module() for c in candidates]  # get the modules from the candidates
-        validate_samples.add_samples(Samples(*self.validate_sampler.sample(candidate_agents,
-                                                                use_prev_batch=use_prev_batch,
-                                                                description_prefix='Validating newly proposed candidates: ')))  # list of BatchRollout objects
-
-        if self.validate_exploration_candidates:
-            if not use_prev_batch:   # validate the exploration candidates that collected the samples as well
-                # validate the agents in the validate_dataset
-                exploration_agents = [c.get_module() for c in exploration_candidates]  # get the modules from the exploration candidates
-                exploration_samples = Samples(*self.validate_sampler.sample(exploration_agents,
-                                              description_prefix='Validating exploration candidates: '))  # sample the exploration agents
-                validate_samples.add_samples(exploration_samples)  # append the exploration samples to the validate_samples
+        # if self.validate_exploration_candidates:
+        #     if not use_prev_batch:   # validate the exploration candidates that collected the samples as well
+        #         # validate the agents in the validate_dataset
+        #         exploration_agents = [c.get_module() for c in exploration_candidates]  # get the modules from the exploration candidates
+        #         exploration_samples = Samples(*self.validate_sampler.sample(exploration_agents,
+        #                                                     description_prefix='Validating exploration candidates: '))  # sample the exploration agents
+        #         validate_samples.add_samples(exploration_samples)  # append the exploration samples to the validate_samples
 
 
         matched_candidates_and_samples = self.match_candidates_and_samples(exploration_candidates + candidates, validate_samples.samples)
@@ -563,8 +580,9 @@ class PrioritySearch(SearchTemplate):
             # Append the rollouts to the list of rollouts for the key
             _results[ids[key]].append(rollouts)
         # assert all candidates have at least one rollout
-        for c in candidates:
-            assert len(_results[c]) > 0, f"ModuleCandidate with id {id(c)} has no rollouts. Samples are not collected by known candidates."
+        # Xuanfei: some candidates may not have rollouts
+        # for c in candidates:
+        #     assert len(_results[c]) > 0, f"ModuleCandidate with id {id(c)} has no rollouts. Samples are not collected by known candidates."
 
         return _results
 
@@ -577,8 +595,26 @@ class PrioritySearch(SearchTemplate):
         print("--- Updating memory with validation results...") if verbose else None
         for candidate, rollouts in validate_results.items():
             candidate.add_rollouts(rollouts)  # add the rollouts to the candidate
-            priority = self.compute_exploration_priority(candidate)  # compute the priority for the candidate
-            self.memory.push(priority, candidate)
+
+            # priority = self.compute_exploration_priority(candidate)  # compute the priority for the candidate
+            placeholder_priority = self.max_score
+            self.memory.push(placeholder_priority, candidate)
+
+    def update_memory_with_regressor(self, verbose: bool = False, **kwargs):
+        """ Update the priority queue with the regressor results.
+        """
+        print("--- Updating memory with regressor results...") if verbose else None
+        # Update predicted scores for all candidates in the memory
+        self.regressor.predict_scores()
+        # Reorder the memory according to the predicted scores
+        self.memory.reorder_according_to_predicted_scores()
+        # For debugging, print the memory stats
+        #self.print_memory_stats()
+
+    def print_memory_stats(self):
+        # For debugging, print all candidates: number, mean_score(), num_rollouts, predicted_score. It is better to see an increasing trend in the predicted scores.
+        for i, (neg_predicted_score, candidate) in enumerate(self.memory):
+            print(f"Candidate {i}, Mean Score: {candidate.mean_score()}, Num Rollouts: {candidate.num_rollouts}, Predicted Score: {-neg_predicted_score}")
 
     def explore(self, verbose: bool = False, **kwargs):
         """ Explore the parameter space and propose new candidates.
@@ -588,11 +624,12 @@ class PrioritySearch(SearchTemplate):
             list: A list of proposed candidates.
             dict: A dictionary containing logging information about the exploration.
         """
-        print(f"--- Generating {min(len(self.memory), self.num_candidates)} exploration candidates...") if verbose else None
+        print(f"--- Generating {min(len(self.memory), self.num_candidates)} exploration candidates...")  if verbose else None
         # pop top self.num_candidates candidates from the priority queue
         # self._best_candidate is the exploited candidate from the previous iteration
-        top_candidates = [self._best_candidate] if self.use_best_candidate_to_explore else []
-        priorities = [self._best_candidate_priority] if self.use_best_candidate_to_explore else []  # to store the priorities of the candidates for logging
+        neg_priority, best_candidate = self.memory.best(self.compute_exploitation_priority)
+        top_candidates = [best_candidate] if self.use_best_candidate_to_explore else []
+        priorities = [-neg_priority]  # to store the priorities of the candidates for logging
         while len(top_candidates) < self.num_candidates and len(self.memory) > 0:
             neg_priority, candidate = self.memory.pop()  # pop the top candidate from the priority queue
             priority = - neg_priority  # remember that we stored negative scores in the priority queue
@@ -607,11 +644,11 @@ class PrioritySearch(SearchTemplate):
         info_dict = {
             'num_exploration_candidates': len(top_candidates),
             'exploration_candidates_mean_priority': np.mean(priorities),  # list of priorities of the exploration candidates
-            'exploration_candidates_mean_score': np.mean(mean_scores),  # list of mean scores of the exploration candidates
+            'exploration_candidates_mean_score': np.mean(mean_scores) if mean_scores else None,  # list of mean scores of the exploration candidates
             'exploration_candidates_average_num_rollouts': np.mean([c.num_rollouts for c in top_candidates]),
         }
 
-        return top_candidates, priorities, info_dict
+        return top_candidates, info_dict
 
     def exploit(self, verbose: bool = False, **kwargs) -> Tuple[ModuleCandidate, Dict[str, Any]]:
         """ Exploit the best candidate from the priority queue. This method should not change the priority queue.
@@ -626,7 +663,7 @@ class PrioritySearch(SearchTemplate):
             raise ValueError("The priority queue is empty. Cannot exploit.")
         neg_priority, best_candidate = self.memory.best(self.compute_exploitation_priority)  # (priority, candidate)
         priority = - neg_priority # remember that we stored negative scores in the priority queue
-        return best_candidate, priority, {
+        return best_candidate, {
             'best_candidate_priority': priority,  # remember that we stored negative scores in the priority queue
             'best_candidate_mean_score': best_candidate.mean_score(),  # mean score of the candidate's rollouts
             'best_candidate_num_rollouts': best_candidate.num_rollouts,  # number of rollouts of the candidate
@@ -646,7 +683,7 @@ class PrioritySearch(SearchTemplate):
         if not isinstance(candidate, ModuleCandidate):
             raise TypeError("candidate must be an instance of ModuleCandidate.")
         # By default, we compute the mean score of the rollouts
-        return candidate.mean_score()
+        return candidate.predicted_score
 
     def compute_exploration_priority(self, candidate) -> float:
         # NOTE This function can be overridden by subclasses to compute a different score
