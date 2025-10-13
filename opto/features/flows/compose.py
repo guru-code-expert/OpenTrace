@@ -1,9 +1,10 @@
 import opto.trace as trace
-from typing import Union, get_type_hints, Any, Dict, List, Optional
+from typing import Union, get_type_hints, Any, Dict, List, Optional, Callable
 from opto.utils.llm import AbstractModel, LLM
-from opto.features.flows.types import MultiModalPayload, QueryModel
+from opto.features.flows.types import MultiModalPayload, QueryModel, StructuredInput, StructuredOutput
 import contextvars
 
+# =========== LLM Base Model ===========
 """
 TracedLLM:
 1. special operations that supports specifying inputs (system_prompt, user_prompt) to LLM and parsing of outputs, wrap
@@ -235,3 +236,73 @@ class TracedLLM:
         """Note that chat/forward always assumes it's a single turn of the conversation. History/context management will be accomplished
            through other APIs"""
         return self.forward(user_query, payload, chat_history_on)
+
+# =========== </LLM Base Model> ===========
+
+# =========== Structured LLM Input/Output With Parsing ===========
+
+"""
+Usage:
+
+@llm_call
+def evaluate_person(person: Person) -> Preference:
+    "Evaluate if a person matches our criteria"
+    ...
+
+person = Person(name="Alice", age=30, income=75000)
+preference = evaluate_person(person)
+
+TODO: add LLM call and parsing logic
+TODO 2: add trace bundle and input/output conversion
+"""
+
+def llm_call(func: Callable):
+    """
+    Decorator that extracts input/output schemas from type-annotated functions.
+
+    Usage:
+        @call_llm
+        def process_person(person: Person) -> Preference:
+            ...
+
+        # Access schemas
+        process_person.input_type
+        process_person.output_type
+        process_person.input_schema
+        process_person.output_schema
+    """
+    hints = get_type_hints(func)
+
+    # Get first parameter type and return type
+    params = list(hints.items())
+    input_type = None
+    output_type = None
+
+    # Find first non-return parameter
+    for param_name, param_type in params:
+        if param_name != 'return':
+            input_type = param_type
+            break
+
+    output_type = hints.get('return')
+
+    # Validate types
+    if input_type and not issubclass(input_type, StructuredInput):
+        raise TypeError(f"Input type {input_type} must inherit from StructuredInput")
+
+    if output_type and not issubclass(output_type, StructuredOutput):
+        raise TypeError(f"Output type {output_type} must inherit from StructuredOutput")
+
+    # Attach metadata to function
+    func.input_type = input_type
+    func.output_type = output_type
+    func.input_schema = input_type.model_json_schema() if input_type else None
+    func.output_schema = output_type.model_json_schema() if output_type else None
+
+    # Additional helper methods
+    func.get_input_docstring = lambda: input_type.get_docstring() if input_type else None
+    func.get_output_docstring = lambda: output_type.get_docstring() if output_type else None
+    func.get_input_fields = lambda: input_type.get_fields_info() if input_type else {}
+    func.get_output_fields = lambda: output_type.get_fields_info() if output_type else {}
+
+    return func
