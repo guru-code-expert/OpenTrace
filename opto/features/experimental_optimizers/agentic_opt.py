@@ -31,6 +31,8 @@ Idea: write it like you would use for VeriBench
 1. bug fix loop
 2. external reward loop
 
+initial task prompt -> initial solution
+initial solution -> improvement prompt -> improved solution -> improvement prompt -> improved solution
 """
 
 
