@@ -15,6 +15,14 @@ class TraceObject:
         raise NotImplementedError("Subclasses must implement __str__")
 
 
+class ForwardMixin:
+    def forward(self, *args, **kwargs):
+        raise NotImplementedError("Subclasses must implement forward")
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+
 # ====== Multi-Modal LLM Support ======
 class MultiModalPayload(BaseModel):
     image_bytes: Optional[str] = None  # base64-encoded data URL
@@ -245,7 +253,6 @@ class StructuredOutput(StructuredData):
             lines.append(f"- {field_name}: {field_value}")
 
         return "\n".join(lines)
-
 
 # ======= </Structured LLM Info Support> ======
 
