@@ -231,6 +231,7 @@ class Check(ForwardMixin):
             result = self.condition_func(*self.args, **self.kwargs)
             # Store both the truthiness and the actual return value
             self.condition_result = result
+
             self.condition_evaluated = True
         return self.condition_result
 

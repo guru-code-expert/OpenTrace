@@ -8,7 +8,7 @@ import heapq
 import contextvars
 
 
-def node(data, name=None, trainable=False, description=None):
+def node(data, name=None, trainable=False, description=None, **kwargs):
     """Create a Node object from data.
 
     This is the primary factory function for creating nodes in the Trace computation graph.
@@ -29,6 +29,9 @@ def node(data, name=None, trainable=False, description=None):
     description : str, optional
         A textual description of the node's purpose or constraints. Used as soft
         constraints during optimization and for documentation.
+    **kwargs : dict
+        Additional keyword arguments to pass to the Node or ParameterNode constructor,
+        such as 'info' or 'projections'.
 
     Returns
     -------
@@ -85,6 +88,7 @@ def node(data, name=None, trainable=False, description=None):
             name=name,
             trainable=True,
             description=description,
+            **kwargs
         )
     else:
         if isinstance(data, Node):
@@ -92,7 +96,7 @@ def node(data, name=None, trainable=False, description=None):
                 warnings.warn(f"Name {name} is ignored because data is already a Node.")
             return data
         else:
-            return Node(data, name=name, description=description)
+            return Node(data, name=name, description=description, **kwargs)
 
 
 NAME_SCOPES = []  # A stack of name scopes

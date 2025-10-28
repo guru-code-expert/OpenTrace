@@ -61,8 +61,8 @@ class AgenticOptimizer(Optimizer):
 Add a veribench optimizer here.
 A code optimizer is general, can work with kernel, others
 
-initial_user_message -> initial_code -> bug fix here
-initial_code -> improvement_prompt -> improved_code -> improvement_prompt -> improved_code
+initial_task_message -> initial_code
+(initial_code, reward) -> optimizer_step -> (improved_code, reward) -> optimizer_step -> improved_code
 
 initial_code 
  1. check if there is a bug. If there is, try 10 times to fix. return the code --> make it correct/compilable
@@ -100,6 +100,23 @@ LLM-based initializer, LLM-based projection
 =============
 planning agent: plan -> coding agent: write the code  
 
+------------
+
+CodeOptimizer:
+1. Optimization history (different from memory)
+
+CodeOptimizer:
+task: make this code run fast, parameterNode(initial code)
+
+oracle: gives value
+
+node(initial_node, description="this is xxx, the value should be...")
+
+------------ 
+
+init_param -> 25 next params (top 5) -> 25 params -> 25 params
+
+Protein: multi-objective optimization
 """
 
 class CodeOptimizer(Optimizer):
@@ -128,6 +145,7 @@ class CodeOptimizer(Optimizer):
 
         # Store environment checker and reward function
         self.bug_judge = bug_judge
+        self.reward_function = reward_function
         self.max_bug_fix_tries = max_bug_fix_tries
         self.max_optimization_tries = max_optimization_tries
 
