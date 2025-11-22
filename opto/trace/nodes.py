@@ -361,6 +361,116 @@ class AbstractNode(Generic[T]):
         if len(current_used_nodes) > 0 and GRAPH.TRACE:  # We're within trace_nodes context.
             current_used_nodes[-1].add(self)
         return self.__getattribute__("_data")
+    
+    @property
+    def is_image(self) -> bool:
+        """Check if the node is an image node.
+
+        Returns:
+            bool: True if the node is an image node, False otherwise.
+
+        Notes:
+            Supports four types of image data:
+            1. Base64 encoded string (data URL format)
+            2. Numpy array (RGB image array)
+            3. PIL Image object
+            4. URL string pointing to an image (pattern-based check, no network request)
+            
+            For URLs, this performs a fast pattern-based check only. For verification
+            with a network request, use verify_image_url() method.
+        """
+        try:
+            from PIL import Image
+            if isinstance(self._data, Image.Image):
+                return True
+        except ImportError:
+            pass
+        
+        # Check if it's a base64 data URL string
+        if isinstance(self._data, str) and self._data.startswith('data:image/'):
+            return True
+        
+        # Check if it's a numpy array (RGB image)
+        try:
+            import numpy as np
+            if isinstance(self._data, np.ndarray):
+                # Check if it's a valid image array (2D or 3D with 3 or 4 channels)
+                if len(self._data.shape) == 2:  # Grayscale
+                    return True
+                elif len(self._data.shape) == 3 and self._data.shape[2] in [3, 4]:  # RGB or RGBA
+                    return True
+        except ImportError:
+            pass
+        
+        # Check if it's an image URL (pattern-based, no network request)
+        if isinstance(self._data, str):
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(self._data)
+                if parsed.scheme in ('http', 'https'):
+                    path = parsed.path.lower()
+                    # Common image extensions
+                    image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', 
+                                       '.svg', '.ico', '.tiff', '.tif', '.heic', '.heif')
+                    if any(path.endswith(ext) for ext in image_extensions):
+                        return True
+            except (ValueError, AttributeError):
+                pass
+        
+        return False
+    
+    def verify_data_is_image_url(self, timeout: float = 1.0) -> bool:
+        """Verify if the node's data is an image URL by checking Content-Type via HEAD request.
+        
+        This method performs an actual network request to verify that a URL points to an image.
+        It should be used when you need definitive verification beyond pattern matching.
+        
+        Args:
+            timeout: Maximum time in seconds to wait for the request. Default is 1.0.
+        
+        Returns:
+            bool: True if the URL returns an image Content-Type, False otherwise.
+            
+        Notes:
+            - This method only applies to http/https URLs
+            - Returns False for non-URL data or if the request fails
+            - Uses HEAD request to avoid downloading the full image
+            - Requires network connectivity
+            
+        Example:
+            >>> node = Node("https://example.com/photo.jpg")
+            >>> node.is_image  # Fast pattern check: True
+            >>> node.verify_image_url()  # Network verification: True/False
+        """
+        if not isinstance(self._data, str):
+            return False
+        
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(self._data)
+            
+            # Only verify http/https URLs
+            if parsed.scheme not in ('http', 'https'):
+                return False
+            
+            # Perform HEAD request to check Content-Type
+            try:
+                import requests
+                response = requests.head(self._data, timeout=timeout, allow_redirects=True)
+                content_type = response.headers.get('content-type', '').lower()
+                return content_type.startswith('image/')
+            except ImportError:
+                warnings.warn(
+                    "requests library not available. Install with: pip install requests",
+                    ImportWarning
+                )
+                return False
+            except (requests.RequestException, Exception):
+                # Network errors, timeouts, invalid URLs, etc.
+                return False
+                
+        except (ValueError, AttributeError):
+            return False
 
     @property
     def parents(self):
