@@ -69,9 +69,13 @@ class AbstractOptimizer:
     """
 
     def __init__(self, parameters: List[ParameterNode], *args, **kwargs):
-        assert type(parameters) is list
-        assert all([isinstance(p, ParameterNode) for p in parameters])
+        self.parameter_check(parameters)
+        # this is a guaranteed basic check, not possible to be overloaded by subclasses
+        assert type(parameters) is list, "Parameters must be a list."
+        assert all([isinstance(p, ParameterNode) for p in parameters]), "Parameters must be a list of ParameterNode instances."
         assert len(parameters) > 0, 'Parameters list is empty.'
+        for p in parameters:
+            assert p.trainable, "Parameter {} must be trainable.".format(p.name)
         self.parameters = parameters
 
     def step(self):
@@ -86,6 +90,17 @@ class AbstractOptimizer:
     def propagator(self):
         """Return a Propagator object that can be used to propagate feedback in backward."""
         raise NotImplementedError
+
+    def parameter_check(self, parameters: List[ParameterNode]):
+        """Check if the parameters are valid.
+        This can be overloaded by subclasses to add more checks.
+
+        Args:
+            parameters: List[ParameterNode]
+                The parameters to check.
+        """
+        pass
+
 
 
 class Optimizer(AbstractOptimizer):

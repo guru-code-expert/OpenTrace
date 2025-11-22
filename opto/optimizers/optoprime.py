@@ -525,6 +525,24 @@ class OptoPrime(Optimizer):
         self.use_json_object_format = use_json_object_format
         self.highlight_variables = highlight_variables
 
+    def parameter_check(self, parameters: List[ParameterNode]):
+        """Check if the parameters are valid.
+        This can be overloaded by subclasses to add more checks.
+
+        Args:
+            parameters: List[ParameterNode]
+                The parameters to check.
+        
+        Raises:
+            AssertionError: If any parameter contains image data.
+        """
+        # Ensure no parameters contain image data
+        for param in parameters:
+            assert not param.is_image, (
+                f"Parameter '{param.name}' contains image data. "
+                f"OptoPrimeV1 optimizer does not support image parameters."
+            )
+
     def default_propagator(self):
         """Return the default Propagator object of the optimizer."""
         return GraphPropagator()

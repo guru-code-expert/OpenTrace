@@ -180,6 +180,7 @@ class OptimizerPromptSymbolSetJSON(OptimizerPromptSymbolSet):
         # Use the centralized extraction logic from OptoPrime
         optoprime_instance = OptoPrime()
         return optoprime_instance.extract_llm_suggestion(response)
+
 class OptimizerPromptSymbolSet2(OptimizerPromptSymbolSet):
     variables_section_title = "# Variables"
     inputs_section_title = "# Inputs"
@@ -465,6 +466,31 @@ class OptoPrimeV2(OptoPrime):
 
         self.prompt_symbols = copy.deepcopy(self.default_prompt_symbols)
         self.initialize_prompt()
+
+    def parameter_check(self, parameters: List[ParameterNode]):
+        """Check if the parameters are valid.
+        This can be overloaded by subclasses to add more checks.
+
+        Args:
+            parameters: List[ParameterNode]
+                The parameters to check.
+        
+        Raises:
+            AssertionError: If more than one parameter contains image data.
+        
+        Notes:
+            OptoPrimeV2 supports image parameters, but only one parameter can be
+            an image at a time since LLMs can only generate one image per inference.
+        """
+        # Count image parameters
+        image_params = [param for param in parameters if param.is_image]
+        
+        if len(image_params) > 1:
+            param_names = ', '.join([f"'{p.name}'" for p in image_params])
+            raise AssertionError(
+                f"OptoPrimeV2 supports at most one image parameter, but found {len(image_params)}: "
+                f"{param_names}. LLMs can only generate one image at a time."
+            )
 
     def add_image_context(self, image: Union[str, Any], context: str = "", format: str = "PNG"):
         """

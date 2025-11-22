@@ -294,6 +294,31 @@ class OPROv2(OptoPrimeV2):
                          include_example=include_example, memory_size=memory_size,
                          problem_context=problem_context,
                          **kwargs)
+    
+    def parameter_check(self, parameters: List[ParameterNode]):
+        """Check if the parameters are valid.
+        This can be overloaded by subclasses to add more checks.
+
+        Args:
+            parameters: List[ParameterNode]
+                The parameters to check.
+        
+        Raises:
+            AssertionError: If more than one parameter contains image data.
+
+        Notes:
+            OPROv2 supports image parameters, but only one parameter can be
+            an image at a time since LLMs can only generate one image per inference.
+        """
+        # Count image parameters
+        image_params = [param for param in parameters if param.is_image]
+        
+        if len(image_params) > 1:
+            param_names = ', '.join([f"'{p.name}'" for p in image_params])
+            raise AssertionError(
+                f"OPROv2 supports at most one image parameter, but found {len(image_params)}: "
+                f"{param_names}. LLMs can only generate one image at a time."
+            )
 
     def problem_instance(self, summary, mask=None):
         """Create a ProblemInstance from an optimization summary.
