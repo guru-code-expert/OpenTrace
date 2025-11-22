@@ -1,7 +1,8 @@
 import json
 from textwrap import dedent
 from dataclasses import dataclass, asdict
-from typing import Dict, Optional
+from typing import Dict, Optional, List
+from opto.trace.nodes import ParameterNode
 
 from opto.optimizers.optoprime_v2 import OptoPrimeV2, OptimizerPromptSymbolSet
 
