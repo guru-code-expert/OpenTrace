@@ -605,7 +605,9 @@ class OptoPrimeV2(OptoPrime):
         return "\n".join(temp_list)
 
     def construct_prompt(self, summary, mask=None, *args, **kwargs):
-        """Construct the system and user prompt."""
+        """Construct the system and user prompt.
+        Expanded to construct a list of content blocks
+        """
         system_prompt = (
                 self.representation_prompt + self.output_format_prompt
         )  # generic representation + output rule
