@@ -10,20 +10,73 @@ import base64
 from pathlib import Path
 import warnings
 
+from abc import ABC, abstractmethod
+
 
 @dataclass
-class TextContent:
+class ContentBlock(ABC):
+    """Abstract base class for all content blocks."""
+    
+    @abstractmethod
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the content block to a dictionary representation.
+        
+        Returns:
+            Dict[str, Any]: Dictionary representation of the content block
+        """
+        raise NotImplementedError("Subclasses must implement this method")
+
+@dataclass
+class TextContent(ContentBlock):
     """Text content block"""
     type: Literal["text"] = "text"
     text: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {"type": self.type, "text": self.text}
+    
+    def __add__(self, other) -> 'TextContent':
+        """Concatenate text content with strings or other TextContent objects.
+        
+        Args:
+            other: String or TextContent to concatenate
+            
+        Returns:
+            TextContent: New TextContent with concatenated text
+        """
+        if isinstance(other, str):
+            return TextContent(text=self.text + other)
+        elif isinstance(other, TextContent):
+            return TextContent(text=self.text + other.text)
+        else:
+            return NotImplemented
+    
+    def __radd__(self, other) -> 'TextContent':
+        """Right-side concatenation (when string is on the left).
+        
+        Args:
+            other: String to concatenate
+            
+        Returns:
+            TextContent: New TextContent with concatenated text
+        """
+        if isinstance(other, str):
+            return TextContent(text=other + self.text)
+        else:
+            return NotImplemented
 
 
 @dataclass
-class ImageContent:
-    """Image content block - supports URLs or base64"""
+class ImageContent(ContentBlock):
+    """Image content block - supports URLs, base64, file paths, and numpy arrays.
+    
+    Supports multiple ways to create an ImageContent:
+    1. Direct instantiation with image_url or image_data
+    2. from_file/from_path: Load from local file path
+    3. from_url: Create from HTTP/HTTPS URL
+    4. from_array: Create from numpy array or array-like RGB image
+    5. from_value: Auto-detect and create from various formats
+    """
     type: Literal["image"] = "image"
     image_url: Optional[str] = None
     image_data: Optional[str] = None  # base64 encoded
@@ -46,7 +99,7 @@ class ImageContent:
 
     @classmethod
     def from_file(cls, filepath: str, media_type: Optional[str] = None):
-        """Load image from file"""
+        """Load image from file path."""
         path = Path(filepath)
         if not media_type:
             ext_to_type = {
@@ -62,6 +115,207 @@ class ImageContent:
             image_data = base64.b64encode(f.read()).decode('utf-8')
 
         return cls(image_data=image_data, media_type=media_type)
+
+    @classmethod
+    def from_path(cls, filepath: str, media_type: Optional[str] = None):
+        """Load image from file path. Alias for from_file."""
+        return cls.from_file(filepath, media_type)
+
+    @classmethod
+    def from_url(cls, url: str, media_type: str = "image/jpeg"):
+        """Create ImageContent from an HTTP/HTTPS URL.
+        
+        Args:
+            url: HTTP or HTTPS URL pointing to an image
+            media_type: MIME type of the image (default: image/jpeg)
+        """
+        return cls(image_url=url, media_type=media_type)
+
+    @classmethod
+    def from_array(cls, array: Any, format: str = "PNG"):
+        """Create ImageContent from a numpy array or array-like RGB image.
+        
+        Args:
+            array: numpy array representing an image (H, W, C) with values in [0, 255] or [0, 1]
+            format: Image format (PNG, JPEG, etc.). Default: PNG
+        
+        Returns:
+            ImageContent with base64-encoded image data
+        """
+        try:
+            import numpy as np
+        except ImportError:
+            raise ImportError("numpy is required for from_array. Install with: pip install numpy")
+        
+        try:
+            from PIL import Image
+        except ImportError:
+            raise ImportError("Pillow is required for from_array. Install with: pip install Pillow")
+        
+        import io
+        
+        # Convert to numpy array if not already
+        if not isinstance(array, np.ndarray):
+            array = np.array(array)
+        
+        # Normalize to [0, 255] if needed
+        if array.dtype == np.float32 or array.dtype == np.float64:
+            if array.max() <= 1.0:
+                array = (array * 255).astype(np.uint8)
+            else:
+                array = array.astype(np.uint8)
+        elif array.dtype != np.uint8:
+            array = array.astype(np.uint8)
+        
+        # Convert to PIL Image and encode
+        image = Image.fromarray(array)
+        buffer = io.BytesIO()
+        image.save(buffer, format=format.upper())
+        buffer.seek(0)
+        
+        image_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
+        media_type = f"image/{format.lower()}"
+        
+        return cls(image_data=image_data, media_type=media_type)
+
+    @classmethod
+    def from_pil(cls, image: Any, format: str = "PNG"):
+        """Create ImageContent from a PIL Image.
+        
+        Args:
+            image: PIL Image object
+            format: Image format (PNG, JPEG, etc.). Default: PNG
+        
+        Returns:
+            ImageContent with base64-encoded image data
+        """
+        import io
+        
+        buffer = io.BytesIO()
+        img_format = image.format or format.upper()
+        image.save(buffer, format=img_format)
+        buffer.seek(0)
+        
+        image_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
+        media_type = f"image/{img_format.lower()}"
+        
+        return cls(image_data=image_data, media_type=media_type)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, media_type: str = "image/jpeg"):
+        """Create ImageContent from raw image bytes.
+        
+        Args:
+            data: Raw image bytes
+            media_type: MIME type of the image (default: image/jpeg)
+        
+        Returns:
+            ImageContent with base64-encoded image data
+        """
+        image_data = base64.b64encode(data).decode('utf-8')
+        return cls(image_data=image_data, media_type=media_type)
+
+    @classmethod
+    def from_base64(cls, b64_data: str, media_type: str = "image/jpeg"):
+        """Create ImageContent from base64-encoded string.
+        
+        Args:
+            b64_data: Base64-encoded image data (without data URL prefix)
+            media_type: MIME type of the image (default: image/jpeg)
+        
+        Returns:
+            ImageContent with the provided base64 data
+        """
+        return cls(image_data=b64_data, media_type=media_type)
+
+    @classmethod
+    def from_data_url(cls, data_url: str):
+        """Create ImageContent from a data URL (data:image/...;base64,...).
+        
+        Args:
+            data_url: Data URL string in format data:image/<type>;base64,<data>
+        
+        Returns:
+            ImageContent with extracted base64 data and media type
+        """
+        try:
+            header, b64_data = data_url.split(',', 1)
+            media_type = header.split(':')[1].split(';')[0]  # e.g., "image/png"
+            return cls(image_data=b64_data, media_type=media_type)
+        except (ValueError, IndexError):
+            # Fallback: assume the whole thing is base64 data
+            return cls(image_data=data_url.split(',')[-1], media_type="image/jpeg")
+
+    @classmethod
+    def from_value(cls, value: Any, format: str = "PNG"):
+        """Auto-detect format and create ImageContent from various input types.
+        
+        Args:
+            value: Can be:
+                - URL string (starting with 'http://' or 'https://')
+                - Data URL string (starting with 'data:image/')
+                - Local file path (string)
+                - Numpy array or array-like RGB image
+                - PIL Image object
+                - Raw bytes
+            format: Image format for numpy arrays (PNG, JPEG, etc.). Default: PNG
+        
+        Returns:
+            ImageContent or None if the value cannot be converted
+        """
+        # Handle string inputs
+        if isinstance(value, str):
+            # Data URL
+            if value.startswith('data:image/'):
+                return cls.from_data_url(value)
+            # HTTP/HTTPS URL
+            if value.startswith('http://') or value.startswith('https://'):
+                return cls.from_url(value)
+            # Assume it's a file path
+            if Path(value).exists():
+                return cls.from_file(value)
+            return None
+        
+        # Handle bytes
+        if isinstance(value, bytes):
+            return cls.from_bytes(value)
+        
+        # Handle PIL Image
+        try:
+            from PIL import Image
+            if isinstance(value, Image.Image):
+                return cls.from_pil(value, format=format)
+        except ImportError:
+            pass
+        
+        # Handle numpy array or array-like
+        try:
+            import numpy as np
+            if isinstance(value, np.ndarray) or hasattr(value, '__array__'):
+                return cls.from_array(value, format=format)
+        except ImportError:
+            pass
+        
+        return None
+
+    def set_image(self, image: Any, format: str = "PNG") -> None:
+        """Set the image from various input formats (mutates self).
+        
+        Args:
+            image: Can be:
+                - URL string (starting with 'http://' or 'https://')
+                - Data URL string (starting with 'data:image/')
+                - Local file path (string)
+                - Numpy array or array-like RGB image
+                - PIL Image object
+                - Raw bytes
+            format: Image format for numpy arrays (PNG, JPEG, etc.). Default: PNG
+        """
+        result = ImageContent.from_value(image, format=format)
+        if result:
+            self.image_url = result.image_url
+            self.image_data = result.image_data
+            self.media_type = result.media_type
 
 
 @dataclass
@@ -160,7 +414,7 @@ ContentBlock = Union[TextContent, ImageContent, PDFContent, FileContent]
 
 
 @dataclass
-class ToolCall:
+class ToolCall(ContentBlock):
     """Represents a tool call made by the LLM"""
     id: str
     type: str  # "function", "web_search", etc.
@@ -177,7 +431,7 @@ class ToolCall:
 
 
 @dataclass
-class ToolResult:
+class ToolResult(ContentBlock):
     """Represents the result of a tool execution"""
     tool_call_id: str
     content: str  # Result as string (can be JSON stringified)
@@ -192,7 +446,7 @@ class ToolResult:
 
 
 @dataclass
-class ToolDefinition:
+class ToolDefinition(ContentBlock):
     """Defines a tool that the LLM can use"""
     type: str  # "function", "web_search", "file_search", etc.
     name: Optional[str] = None
