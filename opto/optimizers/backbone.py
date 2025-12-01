@@ -422,6 +422,7 @@ class ConversationHistory:
     """Manages conversation history across multiple turns using LiteLLM unified format"""
     turns: List[Union[UserTurn, AssistantTurn]] = field(default_factory=list)
     system_prompt: Optional[str] = None
+    protected_rounds: int = 0  # Initial rounds to never truncate (task definition)
 
     def add_user_turn(self, turn: UserTurn) -> 'ConversationHistory':
         """Add a user turn"""
@@ -451,13 +452,15 @@ class ConversationHistory:
         """Convert to dictionary format"""
         return {
             "system_prompt": self.system_prompt,
+            "protected_rounds": self.protected_rounds,
             "turns": [turn.to_dict() for turn in self.turns]
         }
 
     def to_litellm_format(
         self, 
         n: int = -1,
-        truncate_strategy: Literal["from_start", "from_end"] = "from_start"
+        truncate_strategy: Literal["from_start", "from_end"] = "from_start",
+        protected_rounds: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         Convert to LiteLLM messages format (OpenAI-compatible, works with all providers)
@@ -469,28 +472,46 @@ class ConversationHistory:
             truncate_strategy: How to truncate when n is specified:
                 - "from_start": Remove oldest rounds, keep the most recent n rounds (default)
                 - "from_end": Remove newest rounds, keep the oldest n rounds
+            protected_rounds: Number of initial rounds to never truncate (task definition).
+                If None, uses self.protected_rounds. These rounds count towards n, so
+                if n=5 and protected_rounds=1, you get 1 protected + 4 truncatable rounds.
         
         Returns:
             List of message dictionaries in LiteLLM format
         """
+        # Determine protected rounds
+        n_protected = protected_rounds if protected_rounds is not None else self.protected_rounds
+        protected_turns = n_protected * 2  # Each round = user + assistant
+        
         # Apply truncation to turns
         if n == -1:
             selected_turns = self.turns
         else:
-            # n = number of historical rounds (pairs)
+            # Protected rounds count towards N
+            # So if N=5 and protected_rounds=1, we keep 1 protected + 4 from truncatable
+            remaining_rounds = max(0, n - n_protected)
+            
+            # Split into protected and truncatable turns
+            protected_part = self.turns[:protected_turns]
+            truncatable_part = self.turns[protected_turns:]
+            
+            # remaining_rounds = number of rounds (pairs) from the truncatable part
             # Each round = 2 turns (user + assistant)
             # Plus include current incomplete round (if last turn is user, +1)
-            has_incomplete_round = len(self.turns) > 0 and isinstance(self.turns[-1], UserTurn)
-            n_turns = n * 2 + (1 if has_incomplete_round else 0)
+            has_incomplete_round = len(truncatable_part) > 0 and isinstance(truncatable_part[-1], UserTurn)
+            n_turns = remaining_rounds * 2 + (1 if has_incomplete_round else 0)
             
             if truncate_strategy == "from_start":
-                # Keep last n_turns (remove from start)
-                selected_turns = self.turns[-n_turns:] if n_turns > 0 else []
+                # Keep last n_turns from truncatable part (remove from start)
+                truncated_part = truncatable_part[-n_turns:] if n_turns > 0 else []
             elif truncate_strategy == "from_end":
-                # Keep first n_turns (remove from end)
-                selected_turns = self.turns[:n_turns] if n_turns > 0 else []
+                # Keep first n_turns from truncatable part (remove from end)
+                truncated_part = truncatable_part[:n_turns] if n_turns > 0 else []
             else:
                 raise ValueError(f"Unknown truncate_strategy: {truncate_strategy}. Use 'from_start' or 'from_end'")
+            
+            # Combine protected + truncated
+            selected_turns = protected_part + truncated_part
         
         messages = []
 
@@ -514,7 +535,8 @@ class ConversationHistory:
     def to_messages(
         self,
         n: int = -1,
-        truncate_strategy: Literal["from_start", "from_end"] = "from_start"
+        truncate_strategy: Literal["from_start", "from_end"] = "from_start",
+        protected_rounds: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         Alias for to_litellm_format() for convenience
@@ -526,11 +548,13 @@ class ConversationHistory:
             truncate_strategy: How to truncate when n is specified:
                 - "from_start": Remove oldest rounds, keep the most recent n rounds (default)
                 - "from_end": Remove newest rounds, keep the oldest n rounds
+            protected_rounds: Number of initial rounds to never truncate (task definition).
+                If None, uses self.protected_rounds. Counts towards n.
         
         Returns:
             List of message dictionaries in LiteLLM format
         """
-        return self.to_litellm_format(n=n, truncate_strategy=truncate_strategy)
+        return self.to_litellm_format(n=n, truncate_strategy=truncate_strategy, protected_rounds=protected_rounds)
 
     def save_to_file(self, filepath: str):
         """Save conversation history to JSON file"""
@@ -545,7 +569,8 @@ class ConversationHistory:
 
         # This is a simplified loader - you'd want more robust deserialization
         history = cls(
-            system_prompt=data.get('system_prompt')
+            system_prompt=data.get('system_prompt'),
+            protected_rounds=data.get('protected_rounds', 0)
         )
 
         # Note: Full deserialization would require reconstructing objects from dicts
