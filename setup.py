@@ -14,6 +14,7 @@ install_requires = [
     "litellm==1.75.0",
     "black",
     "scikit-learn",
+    "pillow",
     "tensorboardX",
     "tensorboard"
 ]

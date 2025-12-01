@@ -1,13 +1,14 @@
 import base64
 import mimetypes
 import io
-from typing import Dict, Any, Union, Optional
+from typing import Dict, Any, Union, Optional, List
 try:
     import numpy as np
     NUMPY_AVAILABLE = True
 except ImportError:
     NUMPY_AVAILABLE = False
 
+import opto.trace as trace
 
 def print_color(message, color=None, logger=None):
     colors = {
@@ -261,3 +262,106 @@ def encode_numpy_to_base64(array, format: str = "PNG") -> str:
     data_url = f"data:{mime_type};base64,{b64}"
     
     return data_url
+
+class ChatHistory:
+    def __init__(self, max_turn=50, auto_summary=False):
+        """Initialize chat history for multi-turn conversation.
+
+        Args:
+            max_turn: Maximum number of conversation turns to keep in history.
+
+            auto_summary: Whether to automatically summarize old messages
+        """
+        self.messages: List[Dict[str, Any]] = []
+        self.max_len = max_turn * 2
+        self.auto_summary = auto_summary
+
+    def __len__(self):
+        return len(self.messages)
+
+    def add(self, content: Union[trace.Node, str], role):
+        """Add a message to history with role validation.
+
+        Args:
+            content: The content of the message
+            role: The role of the message ("user" or "assistant")
+        """
+        if role not in ["user", "assistant"]:
+            raise ValueError(f"Invalid role '{role}'. Must be 'user' or 'assistant'.")
+
+        # Check for alternating user/assistant pattern
+        if len(self.messages) > 0:
+            last_msg = self.messages[-1]
+            if last_msg["role"] == role:
+                print(f"Warning: Adding consecutive {role} messages. Consider alternating user/assistant messages.")
+
+        self.messages.append({"role": role, "content": content})
+        self._trim_history()
+
+    def append(self, message: Dict[str, Any]):
+        """Append a message directly to history."""
+        if "role" not in message or "content" not in message:
+            raise ValueError("Message must have 'role' and 'content' fields.")
+        self.add(message["content"], message["role"])
+
+    def __iter__(self):
+        return iter(self.messages)
+
+    def get_messages(self) -> List[Dict[str, str]]:
+        messages = []
+        for message in self.messages:
+            if isinstance(message['content'], trace.Node):
+                messages.append({"role": message["role"], "content": message["content"].data})
+            else:
+                messages.append(message)
+        return messages
+
+    def get_messages_as_node(self, llm_name="") -> List[trace.Node]:
+        node_list = []
+        for message in self.messages:
+            # If user query is a node and has other computation attached, we can't rename it
+            if isinstance(message['content'], trace.Node):
+                node_list.append(message['content'])
+            else:
+                role = message["role"]
+                content = message["content"]
+                name = f"{llm_name}_{role}" if llm_name else f"{role}"
+                if role == 'user':
+                    name += "_query"
+                elif role == 'assistant':
+                    name += "_response"
+                node_list.append(trace.node(content, name=name))
+
+        return node_list
+
+    def _trim_history(self):
+        """Trim history to max_len while preserving first user message."""
+        if len(self.messages) <= self.max_len:
+            return
+
+        # Find first user message index
+        first_user_idx = None
+        for i, msg in enumerate(self.messages):
+            if msg["role"] == "user":
+                first_user_idx = i
+                break
+
+        # Keep first user message
+        protected_messages = []
+        if first_user_idx is not None:
+            first_user_msg = self.messages[first_user_idx]
+            protected_messages.append(first_user_msg)
+
+        # Calculate how many recent messages we can keep
+        remaining_slots = self.max_len - len(protected_messages)
+        if remaining_slots > 0:
+            # Get recent messages
+            recent_messages = self.messages[-remaining_slots:]
+            # Avoid duplicating first user message
+            if first_user_idx is not None:
+                first_user_msg = self.messages[first_user_idx]
+                recent_messages = [msg for msg in recent_messages if msg != first_user_msg]
+
+            self.messages = protected_messages + recent_messages
+        else:
+            self.messages = protected_messages

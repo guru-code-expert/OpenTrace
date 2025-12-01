@@ -10,7 +10,7 @@ from opto.utils.llm import LLM
 
 from opto import trace
 from opto.trace import node, bundle
-from opto.optimizers.optoprime_v2 import OptoPrimeV2, OptimizerPromptSymbolSet2
+from opto.optimizers.optoprime_v3 import OptoPrimeV3, OptimizerPromptSymbolSet2
 
 # You can override for temporarly testing a specific optimizer ALL_OPTIMIZERS = [TextGrad] # [OptoPrimeMulti] ALL_OPTIMIZERS = [OptoPrime]
 
@@ -38,7 +38,7 @@ def test_tag_template_change():
     num_1 = node(1, trainable=True)
     num_2 = node(2, trainable=True, description="<=5")
     result = num_1 + num_2
-    optimizer = OptoPrimeV2([num_1, num_2], use_json_object_format=False,
+    optimizer = OptoPrimeV3([num_1, num_2], use_json_object_format=False,
                             ignore_extraction_error=False,
                             include_example=True,
                             optimizer_prompt_symbol_set=OptimizerPromptSymbolSet2())
@@ -74,7 +74,7 @@ def test_function_repr():
     num_1 = node(1, trainable=False)
 
     result = multiply(transform(num_1))
-    optimizer = OptoPrimeV2([multiply.parameter], use_json_object_format=False,
+    optimizer = OptoPrimeV3([multiply.parameter], use_json_object_format=False,
                             ignore_extraction_error=False,
                             include_example=True)
 
@@ -107,7 +107,7 @@ def test_big_data_truncation():
 
     result = list_1 + num_1
 
-    optimizer = OptoPrimeV2([num_1], use_json_object_format=False,
+    optimizer = OptoPrimeV3([num_1], use_json_object_format=False,
                             ignore_extraction_error=False,
                             include_example=True, initial_var_char_limit=10)
 
@@ -128,7 +128,7 @@ def test_extraction_pipeline():
     num_1 = node(1, trainable=True)
     num_2 = node(2, trainable=True, description="<=5")
     result = num_1 + num_2
-    optimizer = OptoPrimeV2([num_1, num_2], use_json_object_format=False,
+    optimizer = OptoPrimeV3([num_1, num_2], use_json_object_format=False,
                             ignore_extraction_error=False,
                             include_example=True,
                             optimizer_prompt_symbol_set=OptimizerPromptSymbolSet2())

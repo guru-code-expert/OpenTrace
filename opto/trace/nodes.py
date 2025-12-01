@@ -291,6 +291,8 @@ def verify_data_is_image_url(url: str, timeout: float = 1.0) -> bool:
     This method performs an actual network request to verify that a URL points to an image.
     It should be used when you need definitive verification beyond pattern matching.
 
+    The method should be called before we convert image to base64 string (e.g., optimization step)
+
     Args:
         timeout: Maximum time in seconds to wait for the request. Default is 1.0.
 
