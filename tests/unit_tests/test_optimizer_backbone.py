@@ -2,6 +2,7 @@
 Comprehensive tests for optimizer backbone components (ConversationHistory, UserTurn, AssistantTurn)
 Tests include: truncation strategies, multimodal content, and conversation management
 """
+import os
 import pytest
 import base64
 from opto.optimizers.backbone import (
@@ -11,6 +12,11 @@ from opto.optimizers.backbone import (
     TextContent,
     ImageContent
 )
+
+# Skip tests if no API credentials are available
+SKIP_REASON = "No API credentials found"
+HAS_CREDENTIALS = os.path.exists("OAI_CONFIG_LIST") or os.environ.get("TRACE_LITELLM_MODEL") or os.environ.get(
+    "OPENAI_API_KEY")
 
 
 # ============================================================================
@@ -350,67 +356,125 @@ def test_truncate_multimodal_conversation():
     assert len(messages[1]["content"]) == 2  # text + image
     assert messages[1]["content"][1]["type"] == "image_url"
 
+# ============================================================================
+# Real LLM Call Tests with Images
+# ============================================================================
 
-if __name__ == "__main__":
-    print("Running optimizer backbone tests...")
-    print("\n" + "="*80)
-    print("TRUNCATION TESTS")
-    print("="*80)
+@pytest.mark.skipif(not HAS_CREDENTIALS, reason=SKIP_REASON)
+def test_real_llm_call_with_multiple_images():
+    """Test sending real images to GPT and getting a response.
     
-    test_default_all_history()
-    print("✓ Default all history")
+    This test sends two flower images to GPT-4 Vision and asks it to compare them.
+    """
+    from opto.utils.llm import LLM
     
-    test_truncate_from_start()
-    print("✓ Truncate from start")
+    # Create conversation with images
+    history = ConversationHistory(system_prompt="You are a helpful assistant that can analyze images.")
     
-    test_truncate_from_end()
-    print("✓ Truncate from end")
+    # Create a user turn with text and two real flower images
+    user_turn = (UserTurn()
+                 .add_text("What are in these images? Is there any difference between them? Please describe each image briefly.")
+                 .add_image(url="https://images.pexels.com/photos/736230/pexels-photo-736230.jpeg")
+                 .add_image(url="https://images.contentstack.io/v3/assets/bltcedd8dbd5891265b/blt134818d279038650/6668df6434f6fb5cd48aac34/beautiful-flowers-rose.jpeg"))
     
-    test_truncate_zero_turns()
-    print("✓ Truncate zero turns")
+    history.add_user_turn(user_turn)
     
-    test_truncate_more_than_available()
-    print("✓ Truncate more than available")
-    
-    test_empty_conversation()
-    print("✓ Empty conversation")
-    
-    test_to_litellm_format_with_truncation()
-    print("✓ LiteLLM format with truncation")
-    
-    test_invalid_strategy()
-    print("✓ Invalid strategy error handling")
-    
-    test_negative_n_values()
-    print("✓ Negative n values")
+    # Get messages in LiteLLM format
+    messages = history.to_litellm_format()
     
     print("\n" + "="*80)
-    print("MULTIMODAL TESTS")
+    print("REAL LLM CALL WITH MULTIPLE IMAGES")
     print("="*80)
+    print(f"\nSending {len(user_turn.content)} content blocks (1 text + 2 images)...")
     
-    test_user_turn_multiple_images()
-    print("✓ User turn with multiple images")
+    # Make the LLM call
+    llm = LLM()
+    response = llm(messages=messages, max_tokens=500)
     
-    test_assistant_turn_multiple_images()
-    print("✓ Assistant turn with multiple images")
+    response_content = response.choices[0].message.content
     
-    test_mixed_content_types_in_turn()
-    print("✓ Mixed content types in turn")
+    print("\n📷 User Query:")
+    print("  What are in these images? Is there any difference between them?")
+    print("\n🤖 GPT Response:")
+    print("-" * 40)
+    print(response_content)
+    print("-" * 40)
     
-    test_multiple_images_with_base64()
-    print("✓ Multiple base64 images")
+    # Store assistant response in history
+    assistant_turn = AssistantTurn().add_text(response_content)
+    history.add_assistant_turn(assistant_turn)
     
-    test_conversation_with_multiple_multi_image_turns()
-    print("✓ Conversation with multiple multi-image turns")
+    # Verify we got a meaningful response
+    assert response_content is not None
+    assert len(response_content) > 50  # Should have some substantial content
+    
+    # The response should mention something about flowers/images
+    response_lower = response_content.lower()
+    assert any(word in response_lower for word in ["flower", "image", "picture", "rose", "pink", "red", "petal"]), \
+        f"Response doesn't seem to describe the flower images: {response_content[:200]}..."
+    
+    print("\n✅ Successfully received and validated GPT response about the images!")
+
+
+@pytest.mark.skipif(not HAS_CREDENTIALS, reason=SKIP_REASON)
+def test_real_llm_multi_turn_with_images():
+    """Test a multi-turn conversation with images.
+    
+    First turn: Ask about images
+    Second turn: Follow-up question about the same images
+    """
+    from opto.utils.llm import LLM
+    
+    history = ConversationHistory(system_prompt="You are a helpful assistant that can analyze images.")
+    llm = LLM()
     
     print("\n" + "="*80)
-    print("INTEGRATION TESTS")
+    print("MULTI-TURN CONVERSATION WITH IMAGES")
     print("="*80)
     
-    test_truncate_multimodal_conversation()
-    print("✓ Truncate multimodal conversation")
+    # Turn 1: Send images and ask about them
+    user_turn1 = (UserTurn()
+                  .add_text("What type of flowers are shown in these images?")
+                  .add_image(url="https://images.pexels.com/photos/736230/pexels-photo-736230.jpeg")
+                  .add_image(url="https://images.contentstack.io/v3/assets/bltcedd8dbd5891265b/blt134818d279038650/6668df6434f6fb5cd48aac34/beautiful-flowers-rose.jpeg"))
     
-    print("\n" + "="*80)
-    print("✅ All tests passed!")
-    print("="*80)
+    history.add_user_turn(user_turn1)
+    messages = history.to_litellm_format()
+    
+    print("\n📷 Turn 1 - User:")
+    print("  What type of flowers are shown in these images? [+ 2 images]")
+    
+    response1 = llm(messages=messages, max_tokens=300)
+    response1_content = response1.choices[0].message.content
+    
+    print("\n🤖 Turn 1 - Assistant:")
+    print(f"  {response1_content[:200]}...")
+    
+    history.add_assistant_turn(AssistantTurn().add_text(response1_content))
+    
+    # Turn 2: Follow-up question (no new images, but context from previous turn)
+    user_turn2 = UserTurn().add_text("Which of these flowers would be better for a romantic gift and why?")
+    history.add_user_turn(user_turn2)
+    
+    messages = history.to_litellm_format()
+    
+    print("\n📷 Turn 2 - User:")
+    print("  Which of these flowers would be better for a romantic gift and why?")
+    
+    response2 = llm(messages=messages, max_tokens=300)
+    response2_content = response2.choices[0].message.content
+    
+    print("\n🤖 Turn 2 - Assistant:")
+    print(f"  {response2_content[:200]}...")
+    
+    # Verify responses
+    assert response1_content is not None and len(response1_content) > 20
+    assert response2_content is not None and len(response2_content) > 20
+    
+    # Turn 2 should reference the context from turn 1
+    response2_lower = response2_content.lower()
+    assert any(word in response2_lower for word in ["flower", "rose", "romantic", "gift", "love"]), \
+        "Turn 2 response doesn't seem to reference the flower context"
+    
+    print("\n✅ Multi-turn conversation with images completed successfully!")
 
