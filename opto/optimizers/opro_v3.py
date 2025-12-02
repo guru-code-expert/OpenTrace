@@ -11,7 +11,7 @@ from dataclasses import dataclass, asdict
 from typing import Dict, Optional, List, Union, Any
 from opto.trace.nodes import ParameterNode, is_image
 
-from opto.optimizers.optoprime_v2 import OptoPrimeV2, OptimizerPromptSymbolSet
+from opto.optimizers.optoprime_v3 import OptoPrimeV3, OptimizerPromptSymbolSet
 from opto.optimizers.backbone import (
     ContentBlock, TextContent, ImageContent, ContentBlockList
 )
@@ -219,7 +219,7 @@ class ProblemInstance:
                     return True
         return False
 
-class OPROv2(OptoPrimeV2):
+class OPROv3(OptoPrimeV3):
     """OPRO (Optimization by PROmpting) optimizer version 2.
 
     OPRO is an optimization algorithm that leverages large language models to
@@ -275,7 +275,7 @@ class OPROv2(OptoPrimeV2):
 
     Examples
     --------
-    >>> optimizer = OPROv2(memory_size=10)
+    >>> optimizer = OPROv3(memory_size=10)
     >>> # Use optimizer to improve solutions based on feedback
     """
     representation_prompt = dedent(
