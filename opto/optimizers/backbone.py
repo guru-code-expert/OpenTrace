@@ -26,6 +26,121 @@ class ContentBlock(ABC):
         """
         raise NotImplementedError("Subclasses must implement this method")
 
+class ContentBlockList(list):
+    """List of content blocks with automatic type conversion.
+    
+    Supports automatic conversion from:
+    - str -> [TextContent(text=str)]
+    - TextContent -> [TextContent]
+    - ImageContent -> [ImageContent]
+    - List[ContentBlock] -> ContentBlockList
+    - None/empty -> []
+    """
+
+    def __init__(self, content: Union[str, 'ContentBlock', List['ContentBlock'], None] = None):
+        """Initialize ContentBlockList with automatic type conversion.
+        
+        Args:
+            content: Can be a string (converted to TextContent), a single ContentBlock,
+                    a list of ContentBlocks, or None (empty list).
+        """
+        super().__init__()
+        if content is not None:
+            self.extend(self._normalize(content))
+    
+    @staticmethod
+    def _normalize(content: Union[str, 'ContentBlock', List['ContentBlock'], None]) -> List['ContentBlock']:
+        """Normalize content to a list of ContentBlocks."""
+        if content is None:
+            return []
+        if isinstance(content, str):
+            return [TextContent(text=content)] if content else []
+        if isinstance(content, list):
+            return content
+        # Single ContentBlock
+        return [content]
+    
+    @classmethod
+    def ensure(cls, content: Union[str, 'ContentBlock', List['ContentBlock'], None]) -> 'ContentBlockList':
+        """Ensure content is a ContentBlockList with automatic conversion.
+        
+        Args:
+            content: String, ContentBlock, list of ContentBlocks, or None
+            
+        Returns:
+            ContentBlockList with the content
+        """
+        if isinstance(content, cls):
+            return content
+        return cls(content)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"type": "list", "blocks": [b.to_dict() for b in self]}
+    
+    def append(self, item: Union[str, 'ContentBlock']) -> 'ContentBlockList':
+        """Append a string or ContentBlock, merging consecutive text.
+        
+        Args:
+            item: String (auto-converted to TextContent) or ContentBlock.
+                  If the last item is TextContent and item is also text,
+                  they are merged into a single TextContent.
+        """
+        if isinstance(item, str):
+            # String: merge with last TextContent or create new one
+            if self and isinstance(self[-1], TextContent):
+                self[-1] = TextContent(text=self[-1].text + item)
+            else:
+                super().append(TextContent(text=item))
+        elif isinstance(item, TextContent):
+            # TextContent: merge with last TextContent or add
+            if self and isinstance(self[-1], TextContent):
+                self[-1] = TextContent(text=self[-1].text + item.text)
+            else:
+                super().append(item)
+        else:
+            # Other ContentBlock types (ImageContent, etc.): just add
+            super().append(item)
+        return self
+    
+    def extend(self, blocks: Union[str, 'ContentBlock', List['ContentBlock'], 'ContentBlockList', None]) -> 'ContentBlockList':
+        """Extend with blocks, merging consecutive TextContent.
+        
+        Args:
+            blocks: String, ContentBlock, list of ContentBlocks, or None.
+                    Strings are auto-converted. Consecutive text is merged.
+        """
+        normalized = self._normalize(blocks)
+        for block in normalized:
+            self.append(block)
+        return self
+    
+    def __add__(self, other) -> 'ContentBlockList':
+        """Concatenate content block lists with other content block lists or strings.
+        
+        Args:
+            other: ContentBlockList, List[ContentBlock], or string to concatenate
+        """
+        if isinstance(other, (ContentBlockList, list)):
+            result = ContentBlockList(list(self))
+            result.extend(other)
+            return result
+        elif isinstance(other, str):
+            result = ContentBlockList(list(self))
+            result.append(TextContent(text=other))
+            return result
+        else:
+            return NotImplemented
+    
+    def __radd__(self, other) -> 'ContentBlockList':
+        """Right-side concatenation (when string is on the left).
+        """
+        if isinstance(other, str):
+            result = ContentBlockList([TextContent(text=other)])
+            result.extend(self)
+            return result
+        else:
+            return NotImplemented
+
 @dataclass
 class TextContent(ContentBlock):
     """Text content block"""
@@ -409,8 +524,9 @@ class FileContent:
         )
 
 
-# Union type for all content types
-ContentBlock = Union[TextContent, ImageContent, PDFContent, FileContent]
+# Union type alias for common content types (for type hints)
+# Note: ContentBlock remains the abstract base class for inheritance
+ContentBlockUnion = Union[TextContent, ImageContent, PDFContent, FileContent]
 
 
 @dataclass

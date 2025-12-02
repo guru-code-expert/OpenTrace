@@ -18,44 +18,12 @@ from opto.utils.llm import AbstractModel, LLM
 from opto.optimizers.buffers import FIFOBuffer
 from opto.optimizers.backbone import (
     ConversationHistory, UserTurn, AssistantTurn,
-    ContentBlock, TextContent, ImageContent
+    ContentBlock, TextContent, ImageContent, ContentBlockList
 )
 import copy
 import pickle
 import re
 from typing import Dict, Any
-
-
-def append_content_block(blocks: List[ContentBlock], block: ContentBlock) -> None:
-    """Append a content block to the list, merging consecutive TextContent blocks.
-    
-    If the last block in the list is a TextContent and the new block is also TextContent,
-    the text is appended to the existing block. Otherwise, the new block is added.
-    
-    Args:
-        blocks: The list of content blocks to append to (modified in place).
-        block: The content block to append.
-    """
-    if isinstance(block, TextContent):
-        if blocks and isinstance(blocks[-1], TextContent):
-            # Merge with the previous TextContent block
-            blocks[-1] = TextContent(text=blocks[-1].text + block.text)
-        else:
-            blocks.append(block)
-    else:
-        # Non-text block (ImageContent, etc.) - just append
-        blocks.append(block)
-
-
-def extend_content_blocks(blocks: List[ContentBlock], new_blocks: List[ContentBlock]) -> None:
-    """Extend content blocks list, merging consecutive TextContent blocks.
-    
-    Args:
-        blocks: The list of content blocks to extend (modified in place).
-        new_blocks: The list of content blocks to add.
-    """
-    for block in new_blocks:
-        append_content_block(blocks, block)
 
 
 def value_to_image_content(value: Any) -> Optional[ImageContent]:
@@ -352,24 +320,18 @@ class ProblemInstance:
 
         return optimization_query
 
-    def _ensure_content_blocks(self, content: Union[str, List[ContentBlock]]) -> List[ContentBlock]:
-        """Ensure content is a list of ContentBlocks."""
-        if isinstance(content, str):
-            return [TextContent(text=content)] if content else []
-        return content
-
-    def to_content_blocks(self) -> List[ContentBlock]:
+    def to_content_blocks(self) -> ContentBlockList:
         """Convert the problem instance to a list of ContentBlocks.
         
         Consecutive TextContent blocks are merged into a single block for efficiency.
         Images and other non-text blocks are kept separate.
         
         Returns:
-            List[ContentBlock]: A list containing TextContent and ImageContent blocks
+            ContentBlockList: A list containing TextContent and ImageContent blocks
                 that represent the complete problem instance including any images
                 from variables, inputs, others, or outputs.
         """
-        blocks: List[ContentBlock] = []
+        blocks = ContentBlockList()
         
         # Header sections (always text)
         header = dedent(f"""
@@ -384,29 +346,29 @@ class ProblemInstance:
 
         # Variables
         """)
-        append_content_block(blocks, TextContent(text=header))
+        blocks.append(header)
         
         # Variables section (may contain images)
-        extend_content_blocks(blocks, self._ensure_content_blocks(self.variables))
+        blocks.extend(self.variables)
         
         # Inputs section
-        append_content_block(blocks, TextContent(text="\n\n# Inputs\n"))
-        extend_content_blocks(blocks, self._ensure_content_blocks(self.inputs))
+        blocks.append("\n\n# Inputs\n")
+        blocks.extend(self.inputs)
         
         # Others section
-        append_content_block(blocks, TextContent(text="\n\n# Others\n"))
-        extend_content_blocks(blocks, self._ensure_content_blocks(self.others))
+        blocks.append("\n\n# Others\n")
+        blocks.extend(self.others)
         
         # Outputs section
-        append_content_block(blocks, TextContent(text="\n\n# Outputs\n"))
-        extend_content_blocks(blocks, self._ensure_content_blocks(self.outputs))
+        blocks.append("\n\n# Outputs\n")
+        blocks.extend(self.outputs)
         
         # Feedback section
-        append_content_block(blocks, TextContent(text=f"\n\n# Feedback\n{self.feedback}"))
+        blocks.append(f"\n\n# Feedback\n{self.feedback}")
         
         # Context section (optional)
         if self.context is not None and self.context.strip() != "":
-            append_content_block(blocks, TextContent(text=f"\n\n# Context\n{self.context}"))
+            blocks.append(f"\n\n# Context\n{self.context}")
         
         return blocks
     
@@ -731,13 +693,13 @@ class OptoPrimeV3(OptoPrime):
         return "\n".join(temp_list)
 
     def repr_node_value_as_content_blocks(self, node_dict, node_tag="node",
-                                          value_tag="value", constraint_tag="constraint") -> List[ContentBlock]:
-        """Returns a list of ContentBlocks representing node values, including images.
+                                          value_tag="value", constraint_tag="constraint") -> ContentBlockList:
+        """Returns a ContentBlockList representing node values, including images.
         
         Consecutive TextContent blocks are merged for efficiency.
         For image values, the text before and after the image are separate blocks.
         """
-        blocks: List[ContentBlock] = []
+        blocks = ContentBlockList()
         
         for k, v in node_dict.items():
             value_data = v[0]
@@ -753,41 +715,41 @@ class OptoPrimeV3(OptoPrime):
                     constraint_expr = f"<{constraint_tag}>\n{constraint}\n</{constraint_tag}>" if constraint is not None and node_tag == self.optimizer_prompt_symbol_set.variable_tag else ""
                     
                     xml_text = f"<{node_tag} name=\"{k}\" type=\"{type_name}\">\n<{value_tag}>\n"
-                    append_content_block(blocks, TextContent(text=xml_text))
+                    blocks.append(xml_text)
                     blocks.append(image_content)  # Image breaks the text flow
                     
                     closing_text = f"\n</{value_tag}>\n{constraint_expr}</{node_tag}>\n\n" if constraint_expr else f"\n</{value_tag}>\n</{node_tag}>\n\n"
-                    append_content_block(blocks, TextContent(text=closing_text))
+                    blocks.append(closing_text)
                 else:
                     # Non-image node: text representation
                     if constraint is not None and node_tag == self.optimizer_prompt_symbol_set.variable_tag:
                         constraint_expr = f"<{constraint_tag}>\n{constraint}\n</{constraint_tag}>"
-                        append_content_block(blocks, TextContent(
-                            text=f"<{node_tag} name=\"{k}\" type=\"{type(value_data).__name__}\">\n<{value_tag}>\n{value_data}\n</{value_tag}>\n{constraint_expr}\n</{node_tag}>\n\n"
-                        ))
+                        blocks.append(
+                            f"<{node_tag} name=\"{k}\" type=\"{type(value_data).__name__}\">\n<{value_tag}>\n{value_data}\n</{value_tag}>\n{constraint_expr}\n</{node_tag}>\n\n"
+                        )
                     else:
-                        append_content_block(blocks, TextContent(
-                            text=f"<{node_tag} name=\"{k}\" type=\"{type(value_data).__name__}\">\n<{value_tag}>\n{value_data}\n</{value_tag}>\n</{node_tag}>\n\n"
-                        ))
+                        blocks.append(
+                            f"<{node_tag} name=\"{k}\" type=\"{type(value_data).__name__}\">\n<{value_tag}>\n{value_data}\n</{value_tag}>\n</{node_tag}>\n\n"
+                        )
             else:
                 # Code node (never an image)
                 constraint_expr = f"<{constraint_tag}>\n{constraint}\n</{constraint_tag}>"
                 signature = constraint.replace("The code should start with:\n", "")
                 func_body = value_data.replace(signature, "")
-                append_content_block(blocks, TextContent(
-                    text=f"<{node_tag} name=\"{k}\" type=\"code\">\n<{value_tag}>\n{signature}{func_body}\n</{value_tag}>\n{constraint_expr}\n</{node_tag}>\n\n"
-                ))
+                blocks.append(
+                    f"<{node_tag} name=\"{k}\" type=\"code\">\n<{value_tag}>\n{signature}{func_body}\n</{value_tag}>\n{constraint_expr}\n</{node_tag}>\n\n"
+                )
         
         return blocks
 
     def repr_node_value_compact_as_content_blocks(self, node_dict, node_tag="node",
-                                                   value_tag="value", constraint_tag="constraint") -> List[ContentBlock]:
-        """Returns a list of ContentBlocks with compact representation, including images.
+                                                   value_tag="value", constraint_tag="constraint") -> ContentBlockList:
+        """Returns a ContentBlockList with compact representation, including images.
         
         Consecutive TextContent blocks are merged for efficiency.
         Non-image values are truncated. Images break the text flow.
         """
-        blocks: List[ContentBlock] = []
+        blocks = ContentBlockList()
         
         for k, v in node_dict.items():
             value_data = v[0]
@@ -803,32 +765,32 @@ class OptoPrimeV3(OptoPrime):
                     constraint_expr = f"<{constraint_tag}>\n{constraint}\n</{constraint_tag}>" if constraint is not None and node_tag == self.optimizer_prompt_symbol_set.variable_tag else ""
                     
                     xml_text = f"<{node_tag} name=\"{k}\" type=\"{type_name}\">\n<{value_tag}>\n"
-                    append_content_block(blocks, TextContent(text=xml_text))
+                    blocks.append(xml_text)
                     blocks.append(image_content)  # Image breaks the text flow
                     
                     closing_text = f"\n</{value_tag}>\n{constraint_expr}</{node_tag}>\n\n" if constraint_expr else f"\n</{value_tag}>\n</{node_tag}>\n\n"
-                    append_content_block(blocks, TextContent(text=closing_text))
+                    blocks.append(closing_text)
                 else:
                     # Non-image node: truncated text representation
                     node_value = self.truncate_expression(value_data, self.initial_var_char_limit)
                     if constraint is not None and node_tag == self.optimizer_prompt_symbol_set.variable_tag:
                         constraint_expr = f"<{constraint_tag}>\n{constraint}\n</{constraint_tag}>"
-                        append_content_block(blocks, TextContent(
-                            text=f"<{node_tag} name=\"{k}\" type=\"{type(value_data).__name__}\">\n<{value_tag}>\n{node_value}\n</{value_tag}>\n{constraint_expr}\n</{node_tag}>\n\n"
-                        ))
+                        blocks.append(
+                            f"<{node_tag} name=\"{k}\" type=\"{type(value_data).__name__}\">\n<{value_tag}>\n{node_value}\n</{value_tag}>\n{constraint_expr}\n</{node_tag}>\n\n"
+                        )
                     else:
-                        append_content_block(blocks, TextContent(
-                            text=f"<{node_tag} name=\"{k}\" type=\"{type(value_data).__name__}\">\n<{value_tag}>\n{node_value}\n</{value_tag}>\n</{node_tag}>\n\n"
-                        ))
+                        blocks.append(
+                            f"<{node_tag} name=\"{k}\" type=\"{type(value_data).__name__}\">\n<{value_tag}>\n{node_value}\n</{value_tag}>\n</{node_tag}>\n\n"
+                        )
             else:
                 # Code node (never an image)
                 constraint_expr = f"<{constraint_tag}>\n{constraint}\n</{constraint_tag}>"
                 signature = constraint.replace("The code should start with:\n", "")
                 func_body = value_data.replace(signature, "")
                 node_value = self.truncate_expression(func_body, self.initial_var_char_limit)
-                append_content_block(blocks, TextContent(
-                    text=f"<{node_tag} name=\"{k}\" type=\"code\">\n<{value_tag}>\n{signature}{node_value}\n</{value_tag}>\n{constraint_expr}\n</{node_tag}>\n\n"
-                ))
+                blocks.append(
+                    f"<{node_tag} name=\"{k}\" type=\"code\">\n<{value_tag}>\n{signature}{node_value}\n</{value_tag}>\n{constraint_expr}\n</{node_tag}>\n\n"
+                )
         
         return blocks
 
@@ -853,9 +815,8 @@ class OptoPrimeV3(OptoPrime):
         problem_inst = self.problem_instance(summary, mask=mask, use_content_blocks=use_content_blocks)
         
         if use_content_blocks:
-            # Build user prompt as a list of ContentBlocks
-            # Consecutive TextContent blocks are merged for efficiency
-            user_content_blocks: List[ContentBlock] = []
+            # Build user prompt as ContentBlockList (auto-merges consecutive text)
+            user_content_blocks = ContentBlockList()
             
             # Add example if included
             if self.include_example:
@@ -863,26 +824,26 @@ class OptoPrimeV3(OptoPrime):
                     example_problem=str(self.example_problem),  # Example is always text
                     example_response=self.example_response,
                 )
-                append_content_block(user_content_blocks, TextContent(text=example_text))
+                user_content_blocks.append(example_text)
             
             # Add problem instance header
-            append_content_block(user_content_blocks, TextContent(text=dedent("""
+            user_content_blocks.append(dedent("""
         Now you see problem instance:
 
         ================================
-        """)))
+        """))
             
             # Add problem instance content blocks (may contain images)
-            extend_content_blocks(user_content_blocks, problem_inst.to_content_blocks())
+            user_content_blocks.extend(problem_inst.to_content_blocks())
             
             # Add footer and final prompt
             var_names = ", ".join(k for k in summary.variables.keys())
             
-            append_content_block(user_content_blocks, TextContent(text=dedent("""
+            user_content_blocks.append(dedent("""
         ================================
 
-        """)))
-            append_content_block(user_content_blocks, TextContent(text=self.final_prompt.format(names=var_names)))
+        """))
+            user_content_blocks.append(self.final_prompt.format(names=var_names))
             
             return system_prompt, user_content_blocks
         else:

@@ -14,7 +14,7 @@ from opto.optimizers.optoprime_v3 import (
     OptoPrimeV3, OptimizerPromptSymbolSet2, ProblemInstance,
     OptimizerPromptSymbolSet, value_to_image_content
 )
-from opto.optimizers.backbone import TextContent, ImageContent, ContentBlock
+from opto.optimizers.backbone import TextContent, ImageContent, ContentBlock, ContentBlockList
 
 # You can override for temporarly testing a specific optimizer ALL_OPTIMIZERS = [TextGrad] # [OptoPrimeMulti] ALL_OPTIMIZERS = [OptoPrime]
 
@@ -431,3 +431,95 @@ def test_repr_node_value_compact_as_content_blocks():
     text_parts = [b.text for b in blocks if isinstance(b, TextContent)]
     full_text = "".join(text_parts)
     assert "skipped due to length limit" in full_text or len(full_text) < len(long_string)
+
+
+# ==================== Real LLM Call Tests ====================
+
+@pytest.mark.skipif(not HAS_CREDENTIALS, reason=SKIP_REASON)
+def test_optimizer_step_real_llm_call():
+    """Test a real optimization step with LLM call."""
+    # Create a simple optimization problem
+    greeting = node("Hello", trainable=True, description="A greeting message")
+    
+    @bundle()
+    def make_sentence(word):
+        """Create a sentence from a word."""
+        return f"{word}, how are you today?"
+    
+    result = make_sentence(greeting)
+    
+    # Create optimizer
+    optimizer = OptoPrimeV3(
+        [greeting],
+        use_json_object_format=False,
+        ignore_extraction_error=True,
+        include_example=False,
+    )
+    
+    # Setup feedback
+    optimizer.zero_feedback()
+    optimizer.backward(result, "The greeting should be more formal and professional")
+    
+    # Execute optimization step - this makes a real LLM call
+    update_dict = optimizer.step(verbose=True)
+    
+    # Verify the optimizer produced a suggestion
+    print(f"Update dict: {update_dict}")
+    
+    # The LLM should have suggested a new value
+    # We don't assert specific content since LLM output varies
+    # but we verify the step completed without error
+    assert optimizer.log is not None
+    assert len(optimizer.log) > 0
+    
+    # Check that the log contains the expected structure
+    last_log = optimizer.log[-1]
+    assert "system_prompt" in last_log
+    assert "user_prompt" in last_log
+    assert "response" in last_log
+    
+    print(f"LLM Response: {last_log['response'][:500]}...")
+
+
+@pytest.mark.skipif(not HAS_CREDENTIALS, reason=SKIP_REASON)
+def test_optimizer_step_with_content_blocks():
+    """Test optimization step using content blocks (multimodal mode)."""
+    # Create trainable parameters
+    num_1 = node(5, trainable=True, description="A number to optimize")
+    num_2 = node(3, trainable=True, description="Another number")
+    
+    result = num_1 + num_2
+    
+    # Create optimizer
+    optimizer = OptoPrimeV3(
+        [num_1, num_2],
+        use_json_object_format=False,
+        ignore_extraction_error=True,
+        include_example=False,
+    )
+    
+    # Setup feedback
+    optimizer.zero_feedback()
+    optimizer.backward(result, "The sum should be exactly 100")
+    
+    # Test that construct_prompt works with content blocks
+    summary = optimizer.summarize()
+    system_prompt, user_prompt = optimizer.construct_prompt(summary, use_content_blocks=True)
+    
+    # Verify content blocks structure
+    from opto.optimizers.backbone import ContentBlockList
+    assert isinstance(user_prompt, ContentBlockList)
+    assert len(user_prompt) > 0
+    
+    # Verify text is merged (should be fewer blocks than if not merged)
+    text_blocks = [b for b in user_prompt if isinstance(b, TextContent)]
+    print(f"Number of text blocks after merging: {len(text_blocks)}")
+    
+    # Execute the step (this makes a real LLM call)
+    update_dict = optimizer.step(verbose=True)
+    
+    print(f"Update dict: {update_dict}")
+    
+    # Verify the step completed
+    assert optimizer.log is not None
+    assert len(optimizer.log) > 0

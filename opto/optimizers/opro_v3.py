@@ -8,10 +8,13 @@ Key difference to v2:
 import json
 from textwrap import dedent
 from dataclasses import dataclass, asdict
-from typing import Dict, Optional, List
-from opto.trace.nodes import ParameterNode
+from typing import Dict, Optional, List, Union, Any
+from opto.trace.nodes import ParameterNode, is_image
 
 from opto.optimizers.optoprime_v2 import OptoPrimeV2, OptimizerPromptSymbolSet
+from opto.optimizers.backbone import (
+    ContentBlock, TextContent, ImageContent, ContentBlockList
+)
 
 # Not inheriting from optoprime_v2 because this should have a smaller set
 class OPROPromptSymbolSet(OptimizerPromptSymbolSet):
@@ -90,13 +93,15 @@ class ProblemInstance:
 
     This dataclass encapsulates a complete problem instance including the
     instruction, current variables/solution, and feedback received.
+    
+    Supports multimodal content - variables can contain images.
 
     Attributes
     ----------
     instruction : str
         The instruction describing what needs to be done or the question to answer.
-    variables : str
-        The current proposed solution that can be modified.
+    variables : Union[str, List[ContentBlock]]
+        The current proposed solution that can be modified. Can contain images.
     feedback : str
         Feedback about the current solution.
     context: str
@@ -111,6 +116,10 @@ class ProblemInstance:
     -------
     __repr__()
         Returns a formatted string representation of the problem instance.
+    to_content_blocks()
+        Returns a ContentBlockList for multimodal prompts.
+    has_images()
+        Returns True if the problem instance contains images.
 
     Notes
     -----
@@ -118,7 +127,7 @@ class ProblemInstance:
     organizes the instruction, variables, and feedback into a structured format.
     """
     instruction: str
-    variables: str
+    variables: Union[str, List[ContentBlock]]
     feedback: str
     context: Optional[str]
 
@@ -137,10 +146,25 @@ class ProblemInstance:
         """
     )
 
+    @staticmethod
+    def _content_to_text(content: Union[str, List[ContentBlock]]) -> str:
+        """Convert content (str or List[ContentBlock]) to text representation."""
+        if isinstance(content, str):
+            return content
+        # Extract text from content blocks, skip images
+        text_parts = []
+        for block in content:
+            if isinstance(block, TextContent):
+                text_parts.append(block.text)
+            elif isinstance(block, ImageContent):
+                text_parts.append("[IMAGE]")
+        return "".join(text_parts)
+
     def __repr__(self) -> str:
+        """Return text-only representation for backward compatibility."""
         optimization_query = self.problem_template.format(
             instruction=self.instruction,
-            variables=self.variables,
+            variables=self._content_to_text(self.variables),
             feedback=self.feedback,
         )
 
@@ -155,6 +179,45 @@ class ProblemInstance:
             optimization_query += context_section
 
         return optimization_query
+
+    def to_content_blocks(self) -> ContentBlockList:
+        """Convert the problem instance to a list of ContentBlocks.
+        
+        Consecutive TextContent blocks are merged into a single block for efficiency.
+        Images and other non-text blocks are kept separate.
+        
+        Returns:
+            ContentBlockList: A list containing TextContent and ImageContent blocks
+                that represent the complete problem instance.
+        """
+        blocks = ContentBlockList()
+        
+        # Instruction section
+        blocks.append(f"# Instruction\n{self.instruction}\n\n# Solution\n")
+        
+        # Variables/Solution section (may contain images)
+        blocks.extend(self.variables)
+        
+        # Feedback section
+        blocks.append(f"\n\n# Feedback\n{self.feedback}")
+        
+        # Context section (optional)
+        if self.context is not None and self.context.strip() != "":
+            blocks.append(f"\n\n# Context\n{self.context}")
+        
+        return blocks
+
+    def has_images(self) -> bool:
+        """Check if this problem instance contains any images.
+        
+        Returns:
+            bool: True if variables field contains ImageContent blocks.
+        """
+        if isinstance(self.variables, list):
+            for block in self.variables:
+                if isinstance(block, ImageContent):
+                    return True
+        return False
 
 class OPROv2(OptoPrimeV2):
     """OPRO (Optimization by PROmpting) optimizer version 2.
@@ -328,7 +391,7 @@ class OPROv2(OptoPrimeV2):
                 f"{param_names}. LLMs can only generate one image at a time."
             )
 
-    def problem_instance(self, summary, mask=None):
+    def problem_instance(self, summary, mask=None, use_content_blocks=False):
         """Create a ProblemInstance from an optimization summary.
 
         Parameters
@@ -338,6 +401,9 @@ class OPROv2(OptoPrimeV2):
         mask : list, optional
             List of sections to mask/hide in the problem instance.
             Can include "#Instruction", variable section title, or feedback section title.
+        use_content_blocks : bool, optional
+            If True, use content blocks for multimodal support (images).
+            If False, use text-only representation.
 
         Returns
         -------
@@ -350,18 +416,93 @@ class OPROv2(OptoPrimeV2):
         useful for ablation studies or specific optimization strategies.
         """
         mask = mask or []
-        return ProblemInstance(
-            instruction=self.objective if "#Instruction" not in mask else "",
-            variables=(
-                self.repr_node_value_compact(summary.variables, node_tag=self.optimizer_prompt_symbol_set.variable_tag,
-                                             value_tag=self.optimizer_prompt_symbol_set.value_tag,
-                                             constraint_tag=self.optimizer_prompt_symbol_set.constraint_tag)
+        
+        if use_content_blocks:
+            # Use content block representation for multimodal support
+            variables_content = (
+                self.repr_node_value_compact_as_content_blocks(
+                    summary.variables,
+                    node_tag=self.optimizer_prompt_symbol_set.variable_tag,
+                    value_tag=self.optimizer_prompt_symbol_set.value_tag,
+                    constraint_tag=self.optimizer_prompt_symbol_set.constraint_tag
+                )
+                if self.optimizer_prompt_symbol_set.variables_section_title not in mask
+                else ContentBlockList()
+            )
+        else:
+            # Use text-only representation (backward compatible)
+            variables_content = (
+                self.repr_node_value_compact(
+                    summary.variables,
+                    node_tag=self.optimizer_prompt_symbol_set.variable_tag,
+                    value_tag=self.optimizer_prompt_symbol_set.value_tag,
+                    constraint_tag=self.optimizer_prompt_symbol_set.constraint_tag
+                )
                 if self.optimizer_prompt_symbol_set.variables_section_title not in mask
                 else ""
-            ),
+            )
+        
+        return ProblemInstance(
+            instruction=self.objective if "#Instruction" not in mask else "",
+            variables=variables_content,
             feedback=summary.user_feedback if self.optimizer_prompt_symbol_set.feedback_section_title not in mask else "",
+            context=self.problem_context if hasattr(self, 'problem_context') else None,
             optimizer_prompt_symbol_set=self.optimizer_prompt_symbol_set
         )
+    
+    def repr_node_value_compact_as_content_blocks(self, node_dict, node_tag="node",
+                                                   value_tag="value", constraint_tag="constraint") -> ContentBlockList:
+        """Returns a ContentBlockList with compact representation, including images.
+        
+        Consecutive TextContent blocks are merged for efficiency.
+        Non-image values are truncated. Images break the text flow.
+        """
+        from opto.optimizers.optoprime_v3 import value_to_image_content
+        
+        blocks = ContentBlockList()
+        
+        for k, v in node_dict.items():
+            value_data = v[0]
+            constraint = v[1]
+            
+            if "__code" not in k:
+                # Check if this is an image
+                image_content = value_to_image_content(value_data)
+                
+                if image_content is not None:
+                    # Image node: output XML structure, then image, then closing
+                    type_name = "image"
+                    constraint_expr = f"<{constraint_tag}>\n{constraint}\n</{constraint_tag}>" if constraint is not None and node_tag == self.optimizer_prompt_symbol_set.variable_tag else ""
+                    
+                    xml_text = f"<{node_tag} name=\"{k}\" type=\"{type_name}\">\n<{value_tag}>\n"
+                    blocks.append(xml_text)
+                    blocks.append(image_content)  # Image breaks the text flow
+                    
+                    closing_text = f"\n</{value_tag}>\n{constraint_expr}</{node_tag}>\n\n" if constraint_expr else f"\n</{value_tag}>\n</{node_tag}>\n\n"
+                    blocks.append(closing_text)
+                else:
+                    # Non-image node: truncated text representation
+                    node_value = self.truncate_expression(value_data, self.initial_var_char_limit)
+                    if constraint is not None and node_tag == self.optimizer_prompt_symbol_set.variable_tag:
+                        constraint_expr = f"<{constraint_tag}>\n{constraint}\n</{constraint_tag}>"
+                        blocks.append(
+                            f"<{node_tag} name=\"{k}\" type=\"{type(value_data).__name__}\">\n<{value_tag}>\n{node_value}\n</{value_tag}>\n{constraint_expr}\n</{node_tag}>\n\n"
+                        )
+                    else:
+                        blocks.append(
+                            f"<{node_tag} name=\"{k}\" type=\"{type(value_data).__name__}\">\n<{value_tag}>\n{node_value}\n</{value_tag}>\n</{node_tag}>\n\n"
+                        )
+            else:
+                # Code node (never an image)
+                constraint_expr = f"<{constraint_tag}>\n{constraint}\n</{constraint_tag}>"
+                signature = constraint.replace("The code should start with:\n", "")
+                func_body = value_data.replace(signature, "")
+                node_value = self.truncate_expression(func_body, self.initial_var_char_limit)
+                blocks.append(
+                    f"<{node_tag} name=\"{k}\" type=\"code\">\n<{value_tag}>\n{signature}{node_value}\n</{value_tag}>\n{constraint_expr}\n</{node_tag}>\n\n"
+                )
+        
+        return blocks
 
     def initialize_prompt(self):
         """Initialize and format the prompt templates.
