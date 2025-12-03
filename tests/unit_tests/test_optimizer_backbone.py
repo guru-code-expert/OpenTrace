@@ -68,45 +68,51 @@ def test_default_all_history():
 
 
 def test_truncate_from_start():
-    """Test truncate_from_start strategy - keeps last N turns"""
+    """Test truncate_from_start strategy - keeps last N rounds"""
     history = create_sample_conversation()
     
-    # Keep last 3 turns
-    messages = history.to_messages(n=3, truncate_strategy="from_start")
+    # Keep last 2 rounds (4 turns)
+    messages = history.to_messages(n=2, truncate_strategy="from_start")
     
-    # Should have: system + 3 turns
-    assert len(messages) == 4  # 1 system + 3 messages
+    # Should have: system + 2 rounds (4 turns)
+    assert len(messages) == 5  # 1 system + 4 messages
     assert messages[0]["role"] == "system"
     
-    # Should have the last 3 turns
-    # Last 3 turns are: assistant3, user4, assistant4
-    assert messages[1]["role"] == "assistant"
-    assert "umbrella" in messages[1]["content"]
-    assert messages[2]["role"] == "user"
-    assert "Thanks" in messages[2]["content"][0]["text"]
-    assert messages[3]["role"] == "assistant"
-    assert "welcome" in messages[3]["content"]
+    # Should have the last 2 rounds (round 3 and round 4)
+    # Round 3: user3 (umbrella question), assistant3 (umbrella answer)
+    # Round 4: user4 (thanks), assistant4 (welcome)
+    assert messages[1]["role"] == "user"
+    assert "umbrella" in messages[1]["content"][0]["text"]
+    assert messages[2]["role"] == "assistant"
+    assert "umbrella" in messages[2]["content"]
+    assert messages[3]["role"] == "user"
+    assert "Thanks" in messages[3]["content"][0]["text"]
+    assert messages[4]["role"] == "assistant"
+    assert "welcome" in messages[4]["content"]
 
 
 def test_truncate_from_end():
-    """Test truncate_from_end strategy - keeps first N turns"""
+    """Test truncate_from_end strategy - keeps first N rounds"""
     history = create_sample_conversation()
     
-    # Keep first 3 turns
-    messages = history.to_messages(n=3, truncate_strategy="from_end")
+    # Keep first 2 rounds (4 turns)
+    messages = history.to_messages(n=2, truncate_strategy="from_end")
     
-    # Should have: system + 3 turns
-    assert len(messages) == 4  # 1 system + 3 messages
+    # Should have: system + 2 rounds (4 turns)
+    assert len(messages) == 5  # 1 system + 4 messages
     assert messages[0]["role"] == "system"
     
-    # Should have the first 3 turns
-    # First 3 turns are: user1, assistant1, user2
+    # Should have the first 2 rounds (round 1 and round 2)
+    # Round 1: user1 (weather), assistant1 (sunny)
+    # Round 2: user2 (tomorrow), assistant2 (rainy)
     assert messages[1]["role"] == "user"
     assert "Hello" in messages[1]["content"][0]["text"]
     assert messages[2]["role"] == "assistant"
     assert "sunny" in messages[2]["content"]
     assert messages[3]["role"] == "user"
     assert "tomorrow" in messages[3]["content"][0]["text"]
+    assert messages[4]["role"] == "assistant"
+    assert "rainy" in messages[4]["content"]
 
 
 def test_truncate_zero_turns():
@@ -145,13 +151,16 @@ def test_to_litellm_format_with_truncation():
     """Test to_litellm_format() also supports truncation"""
     history = create_sample_conversation()
     
+    # n=2 means 2 rounds (4 turns), from_end keeps first 2 rounds
     messages = history.to_litellm_format(n=2, truncate_strategy="from_end")
     
-    # Should have: system + 2 turns
-    assert len(messages) == 3
+    # Should have: system + 2 rounds (4 turns)
+    assert len(messages) == 5
     assert messages[0]["role"] == "system"
     assert messages[1]["role"] == "user"
     assert messages[2]["role"] == "assistant"
+    assert messages[3]["role"] == "user"
+    assert messages[4]["role"] == "assistant"
 
 
 def test_invalid_strategy():
@@ -338,7 +347,7 @@ def test_truncate_multimodal_conversation():
     """Test truncation works correctly with multimodal content"""
     history = ConversationHistory(system_prompt="You are a vision assistant.")
     
-    # Add several turns with images
+    # Add several turns with images (5 rounds = 10 turns)
     for i in range(5):
         user = (UserTurn()
                 .add_text(f"Analyze image {i}")
@@ -346,11 +355,11 @@ def test_truncate_multimodal_conversation():
         assistant = AssistantTurn().add_text(f"Analysis of image {i}")
         history.add_user_turn(user).add_assistant_turn(assistant)
     
-    # Truncate to last 2 turns
+    # Truncate to last 2 rounds (4 turns)
     messages = history.to_messages(n=2, truncate_strategy="from_start")
     
-    # Should have system + 2 turns
-    assert len(messages) == 3
+    # Should have system + 2 rounds (4 turns)
+    assert len(messages) == 5
     
     # Check that multimodal content is preserved
     assert len(messages[1]["content"]) == 2  # text + image

@@ -51,16 +51,20 @@ def test_tag_template_change():
     optimizer.backward(result, 'make this number bigger')
 
     summary = optimizer.summarize()
-    part1, part2 = optimizer.construct_prompt(summary)
+    system_prompt, user_prompt = optimizer.construct_prompt(summary)
 
-    part1 = optimizer.replace_symbols(part1, optimizer.prompt_symbols)
-    part2 = optimizer.replace_symbols(part2, optimizer.prompt_symbols)
+    # system_prompt is a string, user_prompt is a ContentBlockList
+    system_prompt = optimizer.replace_symbols(system_prompt, optimizer.prompt_symbols)
+    
+    # Convert ContentBlockList to text for symbol replacement
+    user_prompt_text = "".join(block.text for block in user_prompt if isinstance(block, TextContent))
+    user_prompt_text = optimizer.replace_symbols(user_prompt_text, optimizer.prompt_symbols)
 
-    assert """<var name="variable_name" type="data_type">""" in part1, "Expected <var> tag to be present in part1"
-    assert """<const name="y" type="int">""" in part2, "Expected <const> tag to be present in part2"
+    assert """<var name="variable_name" type="data_type">""" in system_prompt, "Expected <var> tag to be present in system_prompt"
+    assert """<const name="y" type="int">""" in user_prompt_text, "Expected <const> tag to be present in user_prompt"
 
-    print(part1)
-    print(part2)
+    print(system_prompt)
+    print(user_prompt_text)
 
 
 @bundle()
@@ -86,10 +90,12 @@ def test_function_repr():
     optimizer.backward(result, 'make this number bigger')
 
     summary = optimizer.summarize()
-    part1, part2 = optimizer.construct_prompt(summary)
+    system_prompt, user_prompt = optimizer.construct_prompt(summary)
 
-    part1 = optimizer.replace_symbols(part1, optimizer.prompt_symbols)
-    part2 = optimizer.replace_symbols(part2, optimizer.prompt_symbols)
+    system_prompt = optimizer.replace_symbols(system_prompt, optimizer.prompt_symbols)
+    # Convert ContentBlockList to text for symbol replacement
+    user_prompt_text = "".join(block.text for block in user_prompt if isinstance(block, TextContent))
+    user_prompt_text = optimizer.replace_symbols(user_prompt_text, optimizer.prompt_symbols)
 
     function_repr = """<variable name="__code0" type="code">
 <value>
@@ -102,7 +108,7 @@ def multiply(num):
 </constraint>
 </variable>"""
 
-    assert function_repr in part2, "Expected function representation to be present in part2"
+    assert function_repr in user_prompt_text, "Expected function representation to be present in user_prompt"
 
 def test_big_data_truncation():
     num_1 = node("**2", trainable=True)
@@ -119,14 +125,16 @@ def test_big_data_truncation():
     optimizer.backward(result, 'compute the expression')
 
     summary = optimizer.summarize()
-    part1, part2 = optimizer.construct_prompt(summary)
+    system_prompt, user_prompt = optimizer.construct_prompt(summary)
 
-    part1 = optimizer.replace_symbols(part1, optimizer.prompt_symbols)
-    part2 = optimizer.replace_symbols(part2, optimizer.prompt_symbols)
+    system_prompt = optimizer.replace_symbols(system_prompt, optimizer.prompt_symbols)
+    # Convert ContentBlockList to text for symbol replacement
+    user_prompt_text = "".join(block.text for block in user_prompt if isinstance(block, TextContent))
+    user_prompt_text = optimizer.replace_symbols(user_prompt_text, optimizer.prompt_symbols)
 
     truncated_repr = """1234569191...(skipped due to length limit)"""
 
-    assert truncated_repr in part2, "Expected truncated list representation to be present in part2"
+    assert truncated_repr in user_prompt_text, "Expected truncated list representation to be present in user_prompt"
 
 def test_extraction_pipeline():
     num_1 = node(1, trainable=True)
@@ -141,18 +149,13 @@ def test_extraction_pipeline():
     optimizer.backward(result, 'make this number bigger')
 
     summary = optimizer.summarize()
-    part1, part2 = optimizer.construct_prompt(summary)
+    system_prompt, user_prompt = optimizer.construct_prompt(summary)
 
-    part1 = optimizer.replace_symbols(part1, optimizer.prompt_symbols)
-    part2 = optimizer.replace_symbols(part2, optimizer.prompt_symbols)
+    # Verify construct_prompt returns expected types
+    assert isinstance(system_prompt, str)
+    assert isinstance(user_prompt, list)
 
-    messages = [
-        {"role": "system", "content": part1},
-        {"role": "user", "content": part2},
-    ]
-
-    # response = optimizer.llm(messages=messages)
-    # response = response.choices[0].message.content
+    # Test extraction from a mock response
     response = """<reason>
 The instruction suggests that the output, `add0`, needs to be made bigger than it currently is (3). The code performs an addition of `int0` and `int1` to produce `add0`. To increase `add0`, we can increase the values of `int0` or `int1`, or both. Given that `int1` has a constraint of being less than or equal to 5, we can set `int0` to a higher value, since it has no explicit constraint. By adjusting `int0` to a higher value, the output can be made larger in accordance with the feedback.
 </reason>
@@ -170,7 +173,6 @@ The instruction suggests that the output, `add0`, needs to be made bigger than i
 5
 </data>
 </var>"""
-    reasoning = response
     suggestion = optimizer.extract_llm_suggestion(response)
 
     assert 'reasoning' in suggestion, "Expected 'reasoning' in suggestion"
@@ -185,16 +187,17 @@ The instruction suggests that the output, `add0`, needs to be made bigger than i
 
 def test_problem_instance_text_only():
     """Test that ProblemInstance with text-only content works correctly."""
+    from opto.optimizers.backbone import ContentBlockList
     symbol_set = OptimizerPromptSymbolSet()
     
     instance = ProblemInstance(
         instruction="Test instruction",
         code="y = add(x=a, y=b)",
         documentation="[add] Adds two numbers",
-        variables="<variable name='a' type='int'><value>5</value></variable>",
-        inputs="<node name='b' type='int'><value>3</value></node>",
-        others="",
-        outputs="<node name='y' type='int'><value>8</value></node>",
+        variables=ContentBlockList("<variable name='a' type='int'><value>5</value></variable>"),
+        inputs=ContentBlockList("<node name='b' type='int'><value>3</value></node>"),
+        others=ContentBlockList(),
+        outputs=ContentBlockList("<node name='y' type='int'><value>8</value></node>"),
         feedback="Result should be 10",
         context="Some context",
         optimizer_prompt_symbol_set=symbol_set
@@ -218,24 +221,25 @@ def test_problem_instance_text_only():
 
 
 def test_problem_instance_with_content_blocks():
-    """Test ProblemInstance with List[ContentBlock] fields."""
+    """Test ProblemInstance with ContentBlockList fields containing images."""
+    from opto.optimizers.backbone import ContentBlockList
     symbol_set = OptimizerPromptSymbolSet()
     
     # Create content blocks with an image
-    variables_blocks = [
+    variables_blocks = ContentBlockList([
         TextContent(text="<variable name='img' type='image'><value>"),
         ImageContent(image_url="https://example.com/test.jpg"),
         TextContent(text="</value></variable>")
-    ]
+    ])
     
     instance = ProblemInstance(
         instruction="Analyze the image",
         code="result = analyze(img)",
         documentation="[analyze] Analyzes an image",
-        variables=variables_blocks,  # List[ContentBlock]
-        inputs="",
-        others="",
-        outputs="<node name='result' type='str'><value>cat</value></node>",
+        variables=variables_blocks,
+        inputs=ContentBlockList(),
+        others=ContentBlockList(),
+        outputs=ContentBlockList("<node name='result' type='str'><value>cat</value></node>"),
         feedback="Result should be 'dog'",
         context=None,
         optimizer_prompt_symbol_set=symbol_set
@@ -261,22 +265,23 @@ def test_problem_instance_with_content_blocks():
 
 def test_problem_instance_mixed_content():
     """Test ProblemInstance with mixed text and image content in multiple fields."""
+    from opto.optimizers.backbone import ContentBlockList
     symbol_set = OptimizerPromptSymbolSet()
     
     # Variables with image
-    variables_blocks = [
+    variables_blocks = ContentBlockList([
         TextContent(text="<variable name='prompt' type='str'><value>Hello</value></variable>\n"),
         TextContent(text="<variable name='img' type='image'><value>"),
         ImageContent(image_data="base64data", media_type="image/png"),
         TextContent(text="</value></variable>")
-    ]
+    ])
     
     # Inputs with image
-    inputs_blocks = [
+    inputs_blocks = ContentBlockList([
         TextContent(text="<node name='reference' type='image'><value>"),
         ImageContent(image_url="https://example.com/ref.png"),
         TextContent(text="</value></node>")
-    ]
+    ])
     
     instance = ProblemInstance(
         instruction="Compare images",
@@ -284,8 +289,8 @@ def test_problem_instance_mixed_content():
         documentation="[compare] Compares two images",
         variables=variables_blocks,
         inputs=inputs_blocks,
-        others=[],  # Empty list
-        outputs="<node name='result' type='float'><value>0.8</value></node>",
+        others=ContentBlockList(),
+        outputs=ContentBlockList("<node name='result' type='float'><value>0.8</value></node>"),
         feedback="Similarity should be higher",
         context="Context text",
         optimizer_prompt_symbol_set=symbol_set
@@ -343,8 +348,8 @@ def test_value_to_image_content_non_image():
     assert value_to_image_content("hello world") is None
 
 
-def test_construct_prompt_text_only():
-    """Test construct_prompt with use_content_blocks=False (backward compatible)."""
+def test_construct_prompt():
+    """Test construct_prompt returns ContentBlockList for multimodal support."""
     num_1 = node(1, trainable=True)
     num_2 = node(2, trainable=True)
     result = num_1 + num_2
@@ -354,28 +359,9 @@ def test_construct_prompt_text_only():
     optimizer.backward(result, 'make this number bigger')
     
     summary = optimizer.summarize()
-    system_prompt, user_prompt = optimizer.construct_prompt(summary, use_content_blocks=False)
+    system_prompt, user_prompt = optimizer.construct_prompt(summary)
     
-    # Both should be strings
-    assert isinstance(system_prompt, str)
-    assert isinstance(user_prompt, str)
-    assert "int0" in user_prompt or "int1" in user_prompt
-
-
-def test_construct_prompt_with_content_blocks():
-    """Test construct_prompt with use_content_blocks=True."""
-    num_1 = node(1, trainable=True)
-    num_2 = node(2, trainable=True)
-    result = num_1 + num_2
-    
-    optimizer = OptoPrimeV3([num_1, num_2], use_json_object_format=False)
-    optimizer.zero_feedback()
-    optimizer.backward(result, 'make this number bigger')
-    
-    summary = optimizer.summarize()
-    system_prompt, user_prompt = optimizer.construct_prompt(summary, use_content_blocks=True)
-    
-    # system_prompt should be string, user_prompt should be List[ContentBlock]
+    # system_prompt should be string, user_prompt should be ContentBlockList
     assert isinstance(system_prompt, str)
     assert isinstance(user_prompt, list)
     assert all(isinstance(b, (TextContent, ImageContent)) for b in user_prompt)
@@ -502,9 +488,9 @@ def test_optimizer_step_with_content_blocks():
     optimizer.zero_feedback()
     optimizer.backward(result, "The sum should be exactly 100")
     
-    # Test that construct_prompt works with content blocks
+    # Test that construct_prompt returns ContentBlockList
     summary = optimizer.summarize()
-    system_prompt, user_prompt = optimizer.construct_prompt(summary, use_content_blocks=True)
+    system_prompt, user_prompt = optimizer.construct_prompt(summary)
     
     # Verify content blocks structure
     from opto.optimizers.backbone import ContentBlockList
