@@ -638,7 +638,8 @@ class PrioritySearch(SearchTemplate):
                                               description_prefix='Validating exploration candidates: '))  # sample the exploration agents
                 validate_samples.add_samples(exploration_samples)  # append the exploration samples to the validate_samples
 
-        candidates_to_be_matched = exploration_candidates + candidates if self.validate_exploration_candidates else candidates
+        # Only match exploration candidates if they were actually sampled (i.e., validate_exploration_candidates=True and use_prev_batch=False)
+        candidates_to_be_matched = exploration_candidates + candidates if (self.validate_exploration_candidates and not use_prev_batch) else candidates
         matched_candidates_and_samples = self.match_candidates_and_samples(candidates_to_be_matched, validate_samples.samples)
         results = {}  # dict of ModuleCandidate id: (ModuleCandidate, list of rollouts)
         for c, rollouts in matched_candidates_and_samples.items():  # rollouts is a list of BatchRollouts
