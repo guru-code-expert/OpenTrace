@@ -17,6 +17,147 @@ import random
 from opto.utils.auto_retry import retry_with_exponential_backoff
 import litellm
 import time
+from opto.features.priority_search.priority_search import ModuleCandidate
+
+class RegressorTemplate:
+    """Base class template for regression-based predictors for ModuleCandidate objects.
+    
+    Provides common functionality for embedding generation and candidate processing.
+    Subclasses should implement update() and predict_scores() methods.
+
+    Regressors can be built on this template by implementing the update() and predict_scores() methods. 
+    This class itself is enough for getting embeddings for candidates.
+    """
+    
+    def __init__(self, embedding_model="gemini/text-embedding-004", num_threads=None, regularization_strength=1, linear_dim=None, rich_text=True):
+        # In the regressor, no need for calling LLM to make the prediction. So we could predict the entire memory at once.
+        self.max_candidates_to_predict = 500
+        self.embedding_model = embedding_model
+        self.num_threads = num_threads
+        self.regularization_strength = regularization_strength  # L2 regularization strength (lambda)
+        self.rich_text = rich_text
+        
+        # Default original embedding dimension (from text-embedding-004)
+        self.original_embedding_dim = 768
+        
+        # if linear_dim is not None:
+        #     # Use random projection from 768D to linear_dim
+        #     self.linear_dim = linear_dim
+        #     print_color(f"Using random projection: {self.original_embedding_dim}D → {linear_dim}D", "blue")
+        #     self.random_projector = GaussianRandomProjection(
+        #         input_dim=self.original_embedding_dim,
+        #         output_dim=linear_dim,
+        #         random_seed=42
+        #     )
+        # else:
+        #     # Use default 768D without projection
+        #     self.linear_dim = self.original_embedding_dim
+        #     self.random_projector = None
+        self.linear_dim = self.original_embedding_dim
+        self.random_projector = None
+            
+        # Initialize weights with larger values for more aggressive learning
+        self.weights = np.random.normal(0, 0.1, self.linear_dim)
+        self.bias = 0.0
+
+    def _get_parameter_text(self, candidate):
+        """Get the parameter text for a ModuleCandidate."""
+        if not hasattr(candidate, 'update_dict'):
+            print(candidate)
+        assert hasattr(candidate, 'update_dict'), "ModuleCandidate must have an update_dict"
+        # Convert parameter nodes to readable names for deterministic embedding
+        params_with_names = {k.py_name: v for k, v in candidate.update_dict.items()}
+        
+        # if self.rich_text:
+        #     # Create rich text representation with problem definition and rating question
+        #     rich_text_parts = []
+            
+        #     # Add problem definition
+        #     rich_text_parts.append(f"Problem Definition: {DOMAIN_CONTEXT_VERIBENCH.strip()}")
+        #     rich_text_parts.append("")  # Empty line for separation
+            
+        #     # Add parameter configuration
+        #     rich_text_parts.append("Parameter Configuration:")
+        #     for param_name, param_value in params_with_names.items():
+        #         rich_text_parts.append(f"{param_name}: {param_value}")
+        #     rich_text_parts.append("")  # Empty line for separation
+            
+        #     # Add rating question
+        #     rich_text_parts.append("Question: Based on the problem context above and this parameter configuration, how do you rate this parameter?")
+            
+        #     return "\n".join(rich_text_parts)
+        # else:
+        return str(params_with_names)
+    
+
+    def _get_embedding(self, candidate):
+        """Get the embedding for a ModuleCandidate."""
+        parameter_text = self._get_parameter_text(candidate)
+        
+        def single_embedding_call():
+            return litellm.embedding(
+                model=self.embedding_model,
+                input=parameter_text
+            )
+        
+        try:
+            response = retry_with_exponential_backoff(
+                single_embedding_call,
+                max_retries=10,
+                base_delay=1.0,
+                operation_name="Embedding API call"
+            )
+            embedding = response.data[0].embedding
+            if self.random_projector is not None:
+                # Convert to numpy array and reshape for transform (expects 2D: n_samples x n_features)
+                embedding_array = np.array(embedding).reshape(1, -1)
+                projected = self.random_projector.transform(embedding_array)
+                # Convert back to list and flatten
+                embedding = projected.flatten().tolist()
+            return embedding
+        except Exception as e:
+            print_color(f"ERROR: Embedding API call failed after retries: {e}", "red")
+            return None
+
+    def add_embeddings_to_candidates(self, candidates: List[ModuleCandidate]):
+        """Add embeddings to a list of candidates. This function could be used outside."""
+        self._update_memory_embeddings_for_batch(candidates)
+
+    def _update_memory_embeddings_for_batch(self, batch):
+        """Update the embeddings for a batch of candidates."""
+        # Separate candidates that need embeddings from those that already have them
+        candidates_needing_embeddings = []
+        for candidate in batch:
+            if not hasattr(candidate, "embedding"):
+                candidates_needing_embeddings.append(candidate)
+        
+        # Generate embeddings in parallel for candidates that need them
+        if candidates_needing_embeddings:
+            def get_embedding_for_candidate(candidate):
+                return self._get_embedding(candidate)
+            
+            # Create function list for async_run
+            embedding_functions = [lambda c=candidate: get_embedding_for_candidate(c) 
+                                 for candidate in candidates_needing_embeddings]
+            
+            # Run embedding generation in parallel
+            new_embeddings = async_run(
+                embedding_functions,
+                max_workers=50,
+                description=f"Generating embeddings for {len(candidates_needing_embeddings)} candidates"
+            )
+            
+            # Assign embeddings back to candidates
+            for candidate, embedding in zip(candidates_needing_embeddings, new_embeddings):
+                candidate.embedding = embedding
+
+    def update(self, memory: List[Tuple[float, ModuleCandidate]]):
+        """Update the regression model parameters. Should be implemented by subclasses."""
+        raise NotImplementedError("Subclasses must implement the update method")
+    
+    def predict_scores(self, memory: List[Tuple[float, ModuleCandidate]]):
+        """Predict scores for candidates. Should be implemented by subclasses."""
+        raise NotImplementedError("Subclasses must implement the predict_scores method")
 
 class ModuleCandidateRegressor:
     """
