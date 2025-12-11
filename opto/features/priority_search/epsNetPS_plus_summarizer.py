@@ -97,7 +97,10 @@ class EpsilonNetPS_plus_Summarizer(PrioritySearch):
     
     def compress_candidate_memory(self, candidate: ModuleCandidate) -> ModuleCandidate:
         """ For the summarizer usage, we keep the entire rollout. """
-        return candidate
+        if self.use_summarizer:
+            return candidate
+        else:
+            return super().compress_candidate_memory(candidate)
     
     def propose(self,
                 samples : Samples,
