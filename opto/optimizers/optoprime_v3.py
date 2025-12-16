@@ -25,6 +25,7 @@ import pickle
 import re
 from typing import Dict, Any
 
+DEFAULT_IMAGE_PLACEHOLDER = "[IMAGE]"
 
 def value_to_image_content(value: Any) -> Optional[ImageContent]:
     """Convert a value to ImageContent if it's an image, otherwise return None.
@@ -229,8 +230,66 @@ class OptimizerPromptSymbolSet2(OptimizerPromptSymbolSet):
     name_tag = "name"
 
 
+class MultiModalContent:
+    """Base class for multimodal content blocks.
+    
+    Provides common utilities for handling mixed text/image content.
+    Subclasses should implement to_content_blocks() and __repr__() for their specific structure.
+    
+    The class provides:
+    - _content_to_text(): Static method to convert ContentBlockList to text
+    - to_content_blocks(): Returns ContentBlockList (must be implemented by subclasses)
+    - has_images(): Check if content contains images (uses to_content_blocks by default)
+    - __repr__: Text-only representation (must be implemented by subclasses)
+    """
+    
+    @staticmethod
+    def _content_to_text(content: ContentBlockList) -> str:
+        """Convert ContentBlockList to text representation.
+        
+        Args:
+            content: A ContentBlockList containing text and/or image blocks.
+            
+        Returns:
+            str: Text representation where images are replaced with "[IMAGE]".
+        """
+        text_parts = []
+        for block in content:
+            if isinstance(block, TextContent):
+                text_parts.append(block.text)
+            elif isinstance(block, ImageContent):
+                text_parts.append(f"{DEFAULT_IMAGE_PLACEHOLDER}")
+        return "".join(text_parts)
+    
+    def to_content_blocks(self) -> ContentBlockList:
+        """Convert to a list of ContentBlocks for multimodal prompts.
+        
+        Returns:
+            ContentBlockList: A list containing TextContent and ImageContent blocks.
+        """
+        raise NotImplementedError("Subclasses must implement to_content_blocks()")
+    
+    def has_images(self) -> bool:
+        """Check if this content contains any images.
+        
+        Default implementation iterates through to_content_blocks().
+        Subclasses may override for more efficient implementations.
+        
+        Returns:
+            bool: True if any content contains ImageContent blocks.
+        """
+        for block in self.to_content_blocks():
+            if isinstance(block, ImageContent):
+                return True
+        return False
+    
+    def __repr__(self) -> str:
+        """Return text-only representation for logging and display."""
+        raise NotImplementedError("Subclasses must implement __repr__()")
+
+
 @dataclass
-class ProblemInstance:
+class ProblemInstance(MultiModalContent):
     """Problem instance with multimodal content support.
     
     Uses ContentBlockList for variables, inputs, others, and outputs to support
@@ -279,17 +338,6 @@ class ProblemInstance:
         {feedback}
         """
     )
-
-    @staticmethod
-    def _content_to_text(content: ContentBlockList) -> str:
-        """Convert ContentBlockList to text representation."""
-        text_parts = []
-        for block in content:
-            if isinstance(block, TextContent):
-                text_parts.append(block.text)
-            elif isinstance(block, ImageContent):
-                text_parts.append("[IMAGE]")
-        return "".join(text_parts)
 
     def __repr__(self) -> str:
         """Return text-only representation for backward compatibility."""
@@ -371,17 +419,294 @@ class ProblemInstance:
     def has_images(self) -> bool:
         """Check if this problem instance contains any images.
         
+        Overrides base implementation for efficiency by checking
+        fields directly without building full content blocks.
+        
         Returns:
             bool: True if any field contains ImageContent blocks.
         """
-        for field in [self.variables, self.inputs, self.others, self.outputs]:
-            if isinstance(field, list):
-                for block in field:
+        for content_field in [self.variables, self.inputs, self.others, self.outputs]:
+            if isinstance(content_field, list):
+                for block in content_field:
                     if isinstance(block, ImageContent):
                         return True
         return False
 
-class OptoPrimeV3(OptoPrime):
+
+@dataclass
+class Context(MultiModalContent):
+    """Provide context to the optimizer agent.
+    
+    A specialized mixed text/image block allowing users to insert context
+    in any format (text, images, or mixed content). This enables flexible
+    context injection for optimization tasks.
+    
+    The context can be:
+    - Pure text: Context("Your text here")
+    - Image: Context(ImageContent.from_file("image.png"))
+    - Mixed: Context(ContentBlockList([TextContent("desc"), ImageContent(...)]))
+    
+    Examples:
+        # Text-only context
+        ctx = Context("Important background information")
+        
+        # Image context
+        ctx = Context(ImageContent.from_file("diagram.png"))
+        
+        # Mixed content
+        blocks = ContentBlockList()
+        blocks.append("Here's the relevant diagram:")
+        blocks.append(ImageContent.from_file("diagram.png"))
+        ctx = Context(blocks)
+    """
+    content: ContentBlockList = field(default_factory=ContentBlockList)
+    
+    def __post_init__(self):
+        """Normalize content to ContentBlockList after dataclass initialization."""
+        if isinstance(self.content, str):
+            self.content = ContentBlockList(self.content)
+        elif isinstance(self.content, ContentBlock) and not isinstance(self.content, ContentBlockList):
+            # Single ContentBlock (e.g., ImageContent)
+            self.content = ContentBlockList([self.content])
+        elif isinstance(self.content, list) and not isinstance(self.content, ContentBlockList):
+            # Regular list of ContentBlocks
+            self.content = ContentBlockList(self.content)
+        elif self.content is None:
+            self.content = ContentBlockList()
+        # If already ContentBlockList, keep as-is
+
+    def to_content_blocks(self) -> ContentBlockList:
+        """Convert the context to a list of ContentBlocks.
+        
+        Returns:
+            ContentBlockList: The content blocks representing this context.
+        """
+        return self.content
+    
+    def has_images(self) -> bool:
+        """Check if this context contains any images.
+        
+        Returns:
+            bool: True if content contains ImageContent blocks.
+        """
+        return any(isinstance(block, ImageContent) for block in self.content)
+    
+    def __repr__(self) -> str:
+        """Return text-only representation for logging.
+        
+        Images are represented as "[IMAGE]" placeholder.
+        
+        Returns:
+            str: Text representation of the context.
+        """
+        return self._content_to_text(self.content)
+    
+    def __bool__(self) -> bool:
+        """Check if context has any content.
+        
+        Returns:
+            bool: True if context is non-empty.
+        """
+        if not self.content:
+            return False
+        # Check if there's any actual content (not just empty text)
+        for block in self.content:
+            if isinstance(block, ImageContent):
+                return True
+            if isinstance(block, TextContent) and block.text.strip():
+                return True
+        return False
+    
+    def __len__(self) -> int:
+        """Return the number of content blocks.
+        
+        Returns:
+            int: Number of content blocks.
+        """
+        return len(self.content)
+    
+    def append(self, item: Union[str, ContentBlock]) -> 'Context':
+        """Append content to this context.
+        
+        Args:
+            item: String (auto-converted to TextContent) or ContentBlock.
+            
+        Returns:
+            Context: Self for method chaining.
+        """
+        self.content.append(item)
+        return self
+    
+    def extend(self, items: Union[str, ContentBlock, List[ContentBlock], ContentBlockList]) -> 'Context':
+        """Extend context with additional content.
+        
+        Args:
+            items: Content to add (string, ContentBlock, or list of ContentBlocks).
+            
+        Returns:
+            Context: Self for method chaining.
+        """
+        self.content.extend(items)
+        return self
+    
+    @classmethod
+    def from_text(cls, text: str) -> 'Context':
+        """Create a Context from plain text.
+        
+        Args:
+            text: The text content.
+            
+        Returns:
+            Context: A new Context instance with the text.
+        """
+        return cls(content=ContentBlockList(text))
+    
+    @classmethod
+    def from_image(cls, image: Union[str, ImageContent, Any], format: str = "PNG") -> 'Context':
+        """Create a Context from an image.
+        
+        Args:
+            image: Can be:
+                - ImageContent instance
+                - URL string (http/https)
+                - File path string
+                - PIL Image object
+                - Numpy array
+            format: Image format for arrays (PNG, JPEG, etc.). Default: PNG
+            
+        Returns:
+            Context: A new Context instance with the image.
+        """
+        if isinstance(image, ImageContent):
+            image_content = image
+        else:
+            image_content = ImageContent.from_value(image, format=format)
+            if image_content is None:
+                raise ValueError(f"Could not convert {type(image)} to ImageContent")
+        return cls(content=ContentBlockList([image_content]))
+
+
+class ContextBuildUtils:
+    """Mixin providing utilities for building Context objects from various input formats."""
+    
+    @staticmethod
+    def _build_context_from_args(
+        *args, images: Optional[List[Any]] = None, format: str = "PNG"
+    ) -> Context:
+        """Build a Context object from the provided arguments.
+        
+        Supports two patterns:
+        - Usage 1 (images=None): Variadic args with alternating text/images
+        - Usage 2 (images provided): Template string with [IMAGE] placeholders
+        
+        Args:
+            *args: Variable arguments (text strings and/or image sources)
+            images: Optional list of images for template mode
+            format: Image format for numpy arrays
+            
+        Returns:
+            Context: A Context object containing the multimodal content.
+        """
+        if images is not None:
+            # Usage 2: Template mode with placeholders
+            return ContextBuildUtils._build_context_from_template(*args, images=images, format=format)
+        else:
+            # Usage 1: Variadic mode with alternating text/images
+            return ContextBuildUtils._build_context_from_variadic(*args, format=format)
+    
+    @staticmethod
+    def _build_context_from_variadic(*args, format: str = "PNG") -> Context:
+        """Build Context from variadic arguments (Usage 1).
+        
+        Each argument is either text (str) or an image source.
+        
+        Args:
+            *args: Alternating text and image sources
+            format: Image format for numpy arrays
+            
+        Returns:
+            Context: A Context object with the content.
+        """
+        ctx = Context()
+        
+        for arg in args:
+            if isinstance(arg, str):
+                # Check if it could be an image URL or file path
+                image_content = ImageContent.from_value(arg, format=format)
+                if image_content is not None:
+                    ctx.append(image_content)
+                else:
+                    # It's just text
+                    ctx.append(arg)
+            else:
+                # Try to convert to image
+                image_content = ImageContent.from_value(arg, format=format)
+                if image_content is not None:
+                    ctx.append(image_content)
+                else:
+                    # Fallback: convert to string
+                    ctx.append(str(arg))
+        
+        return ctx
+    
+    @staticmethod
+    def _build_context_from_template(
+        *args, images: List[Any], format: str = "PNG"
+    ) -> Context:
+        """Build Context from template with placeholders (Usage 2).
+        
+        The template string contains [IMAGE] placeholders that are replaced
+        by images from the images list.
+        
+        Args:
+            *args: Should be a single template string
+            images: List of image sources to insert at placeholders
+            format: Image format for numpy arrays
+            
+        Returns:
+            Context: A Context object with placeholders replaced by images.
+            
+        Raises:
+            ValueError: If number of placeholders doesn't match number of images
+        """
+        if len(args) != 1 or not isinstance(args[0], str):
+            raise ValueError(
+                "Usage 2 requires exactly one template string as the first argument. "
+                f"Got {len(args)} arguments."
+            )
+        
+        template = args[0]
+        placeholder = DEFAULT_IMAGE_PLACEHOLDER
+        
+        # Count placeholders
+        placeholder_count = template.count(placeholder)
+        if placeholder_count != len(images):
+            raise ValueError(
+                f"Number of {placeholder} placeholders ({placeholder_count}) "
+                f"does not match number of images ({len(images)})"
+            )
+        
+        ctx = Context()
+        
+        # Split template by placeholder and interleave with images
+        parts = template.split(placeholder)
+        
+        for i, part in enumerate(parts):
+            if part:  # Add text part if non-empty
+                ctx.append(part)
+            
+            # Add image after each part except the last
+            if i < len(images):
+                image_content = ImageContent.from_value(images[i], format=format)
+                if image_content is None:
+                    raise ValueError(
+                        f"Could not convert image at index {i} to ImageContent: {type(images[i])}"
+                    )
+                ctx.append(image_content)
+        
+        return ctx
+
+class OptoPrimeV3(OptoPrime, ContextBuildUtils):
     # This is generic representation prompt, which just explains how to read the problem.
     representation_prompt = dedent(
         """You're tasked to solve a coding/algorithm problem. You will see the instruction, the code, the documentation of each function used in the code, and the feedback about the execution result.
@@ -491,13 +816,13 @@ class OptoPrimeV3(OptoPrime):
             optimizer_prompt_symbol_set: OptimizerPromptSymbolSet = OptimizerPromptSymbolSet(),
             use_json_object_format=True,  # whether to use json object format for the response when calling LLM
             truncate_expression=truncate_expression,
-            problem_context: Optional[str] = None,
+            problem_context: Optional[Context] = None,
             **kwargs,
     ):
         super().__init__(parameters, *args, propagator=propagator, **kwargs)
 
         self.truncate_expression = truncate_expression
-        self.problem_context = problem_context
+        self.problem_context: Optional[Context] = None
         self.multimodal_payload = MultiModalPayload()
 
         self.use_json_object_format = use_json_object_format if optimizer_prompt_symbol_set.expect_json and use_json_object_format else False
@@ -568,35 +893,62 @@ class OptoPrimeV3(OptoPrime):
                 f"{param_names}. LLMs can only generate one image at a time."
             )
 
-    def add_image_context(self, image: Union[str, Any], context: str = "", format: str = "PNG"):
-        """
-        Add an image to the optimizer context.
+    def add_context(self, *args, images: Optional[List[Any]] = None, format: str = "PNG"):
+        """Add context to the optimizer, supporting both text and images.
+        
+        Two usage patterns are supported:
+        
+        **Usage 1: Variadic arguments (alternating text and images)**
+        
+            optimizer.add_context("text part 1", image_link, "text part 2", image_file)
+            
+        Each argument is either a string (text) or an image source.
+        
+        **Usage 2: Template with placeholders**
+        
+            optimizer.add_context(
+                "text part 1 [IMAGE] text part 2 [IMAGE]", 
+                images=[image_link, image_file]
+            )
+            
+        The text contains `[IMAGE]` placeholders that are replaced by images
+        from the `images` list in order. The number of placeholders must match
+        the number of images.
         
         Args:
-            image: Can be:
-                - URL string (starting with 'http://' or 'https://')
-                - Local file path (string)
-                - Numpy array or array-like RGB image
-            context: Optional context text to describe the image. If empty, uses default.
+            *args: Variable arguments. In Usage 1, alternating text and images.
+                   In Usage 2, a single template string with placeholders.
+            images: Optional list of image sources for Usage 2. Each can be:
+                - URL string (http/https)
+                - Local file path
+                - PIL Image object
+                - Numpy array
             format: Image format for numpy arrays (PNG, JPEG, etc.). Default: PNG
+        
+        Raises:
+            ValueError: If using Usage 2 and the number of placeholders doesn't
+                match the number of images.
+        
+        Examples:
+            # Usage 1: Alternating text and images
+            optimizer.add_context("Here's the diagram:", "diagram.png", "And here's another:", "other.png")
+            
+            # Usage 2: Template with placeholders
+            optimizer.add_context("See [IMAGE] and compare with [IMAGE]", images=["a.png", "b.png"])
+            
+            # Text-only context
+            optimizer.add_context("Important background information")
         """
+        ctx = self._build_context_from_args(*args, images=images, format=format)
+        
+        # Store the context
         if self.problem_context is None:
-            self.problem_context = ""
-
-        if context == "":
-            context = "The attached image is given to the workflow. You should use the image to help you understand the problem and provide better suggestions. You can refer to the image when providing your suggestions."
-
-        self.problem_context += f"{context}\n\n"
-
-        # Set the image using the multimodal payload
-        self.multimodal_payload.set_image(image, format=format)
-
-        self.initialize_prompt()
-
-    def add_context(self, context: str):
-        if self.problem_context is None:
-            self.problem_context = ""
-        self.problem_context += f"{context}\n\n"
+            self.problem_context = ctx
+        else:
+            # Append to existing context with a newline separator
+            self.problem_context.append("\n\n")
+            self.problem_context.extend(ctx.to_content_blocks())
+        
         self.initialize_prompt()
 
     def initialize_prompt(self):
@@ -792,7 +1144,14 @@ class OptoPrimeV3(OptoPrime):
 
     def construct_prompt(self, summary, mask=None, *args, **kwargs):
         """Construct the system and user prompt.
-        
+
+        The prompt for the optimizer agent is rather complex.
+        There are prompts that are automatically constructed through the Trace frontend (aka the bundle/node API).
+        However, we also allow the user to provide additional context to the optimizer agent.
+
+        We handle multimodal (MM) conversion implicitly for the automatic part (TraceGraph),
+        but we handle the user-provided context explicitly.
+
         Args:
             summary: The FunctionFeedback summary containing graph information.
             mask: List of section titles to exclude from the problem instance.
@@ -996,7 +1355,7 @@ class OptoPrimeV3(OptoPrime):
             # Print text portions, indicate if images present
             text_parts = [block.text for block in user_prompt if isinstance(block, TextContent)]
             has_images = any(isinstance(block, ImageContent) for block in user_prompt)
-            suffix = " [+ images]" if has_images else ""
+            suffix = f" [+ {DEFAULT_IMAGE_PLACEHOLDER}]" if has_images else ""
             print("Prompt\n", system_prompt + "".join(text_parts) + suffix)
 
         # Update system prompt in conversation history
