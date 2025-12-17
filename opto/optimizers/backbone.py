@@ -39,6 +39,14 @@ class ContentBlock:
             ContentBlock: The built content block
         """
         raise NotImplementedError("Subclasses must implement this method")
+    
+    def is_empty(self) -> bool:
+        """Check if the content block is empty (has no meaningful content).
+        
+        Returns:
+            bool: True if the block is empty, False otherwise
+        """
+        raise NotImplementedError("Subclasses must implement this method")
 
 class ContentBlockList(list):
     """List of content blocks with automatic type conversion.
@@ -178,7 +186,7 @@ class ContentBlockList(list):
                 text_parts.append(block.text)
             elif isinstance(block, ImageContent):
                 text_parts.append(image_placeholder)
-        return "".join(text_parts)
+        return " ".join(text_parts)
     
     def to_text(self, image_placeholder: str = DEFAULT_IMAGE_PLACEHOLDER) -> str:
         """Convert this list to text representation.
@@ -429,6 +437,14 @@ class TextContent(ContentBlock):
     type: Literal["text"] = "text"
     text: str = ""
 
+    def __post_init__(self):
+        # Ensure type is always "text" (fixes issue when user passes positional arg)
+        object.__setattr__(self, 'type', 'text')
+
+    def is_empty(self) -> bool:
+        """Check if the text content is empty."""
+        return not self.text
+
     @classmethod
     def build(cls, value: Any = "", **kwargs) -> 'TextContent':
         """Build a text content block from a value.
@@ -457,9 +473,9 @@ class TextContent(ContentBlock):
             TextContent: New TextContent with concatenated text
         """
         if isinstance(other, str):
-            return TextContent(text=self.text + other)
+            return TextContent(text=self.text + " " + other)
         elif isinstance(other, TextContent):
-            return TextContent(text=self.text + other.text)
+            return TextContent(text=self.text + " " + other.text)
         else:
             return NotImplemented
     
@@ -473,7 +489,7 @@ class TextContent(ContentBlock):
             TextContent: New TextContent with concatenated text
         """
         if isinstance(other, str):
-            return TextContent(text=other + self.text)
+            return TextContent(text=other + " " + self.text)
         else:
             return NotImplemented
 
@@ -494,6 +510,14 @@ class ImageContent(ContentBlock):
     image_data: Optional[str] = None  # base64 encoded
     media_type: str = "image/jpeg"  # image/jpeg, image/png, image/gif, image/webp
     detail: Optional[str] = None  # OpenAI: "auto", "low", "high"
+
+    def __post_init__(self):
+        # Ensure type is always "image" (fixes issue when user passes positional arg)
+        object.__setattr__(self, 'type', 'image')
+
+    def is_empty(self) -> bool:
+        """Check if the image content is empty (no URL or data)."""
+        return not self.image_url and not self.image_data
 
     def to_dict(self) -> Dict[str, Any]:
         if self.image_url:
@@ -659,7 +683,7 @@ class ImageContent(ContentBlock):
             return cls(image_data=data_url.split(',')[-1], media_type="image/jpeg")
 
     @classmethod
-    def build(cls, value: Any, format: str = "PNG"):
+    def build(cls, value: Any, format: str = "PNG") -> 'ImageContent':
         """Auto-detect format and create ImageContent from various input types.
         
         Args:
@@ -675,6 +699,17 @@ class ImageContent(ContentBlock):
         Returns:
             ImageContent or None if the value cannot be converted
         """
+        # handle None
+        if not value:
+            return cls()
+
+        # handle self
+        if isinstance(value, cls):
+            return value
+
+        if not value.strip():
+            return cls()
+
         # Handle string inputs
         if isinstance(value, str):
             # Data URL
@@ -686,7 +721,7 @@ class ImageContent(ContentBlock):
             # Assume it's a file path
             if Path(value).exists():
                 return cls.from_file(value)
-            return None
+            return cls()
         
         # Handle bytes
         if isinstance(value, bytes):
@@ -708,7 +743,7 @@ class ImageContent(ContentBlock):
         except ImportError:
             pass
         
-        return None
+        return cls()
 
     def set_image(self, image: Any, format: str = "PNG") -> None:
         """Set the image from various input formats (mutates self).
@@ -737,6 +772,14 @@ class PDFContent(ContentBlock):
     pdf_url: Optional[str] = None
     pdf_data: Optional[str] = None  # base64 encoded
     filename: Optional[str] = None
+
+    def __post_init__(self):
+        # Ensure type is always "pdf" (fixes issue when user passes positional arg)
+        object.__setattr__(self, 'type', 'pdf')
+
+    def is_empty(self) -> bool:
+        """Check if the PDF content is empty (no URL or data)."""
+        return not self.pdf_url and not self.pdf_data
 
     @classmethod
     def build(cls, value: Any, **kwargs) -> 'PDFContent':
@@ -844,6 +887,10 @@ class FileContent(ContentBlock):
         
         return None
 
+    def is_empty(self) -> bool:
+        """Check if the file content is empty (no data)."""
+        return not self.file_data
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "type": self.type,
@@ -903,6 +950,10 @@ class ToolCall(ContentBlock):
     name: Optional[str] = None  # function name
     arguments: Optional[Dict[str, Any]] = None  # function arguments
 
+    def is_empty(self) -> bool:
+        """Check if the tool call is empty (no id)."""
+        return not self.id
+
     def to_dict(self) -> Dict[str, Any]:
         result = {"id": self.id, "type": self.type}
         if self.name:
@@ -918,6 +969,10 @@ class ToolResult(ContentBlock):
     tool_call_id: str
     content: str  # Result as string (can be JSON stringified)
     is_error: bool = False
+
+    def is_empty(self) -> bool:
+        """Check if the tool result is empty (no tool_call_id)."""
+        return not self.tool_call_id
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -937,6 +992,10 @@ class ToolDefinition(ContentBlock):
     strict: bool = False  # OpenAI strict mode
     # Provider-specific fields
     extra: Dict[str, Any] = field(default_factory=dict)
+
+    def is_empty(self) -> bool:
+        """Check if the tool definition is empty (no type)."""
+        return not self.type
 
     def to_dict(self) -> Dict[str, Any]:
         result = {"type": self.type}
@@ -1022,6 +1081,9 @@ class UserTurn:
         """Convert to LiteLLM format (OpenAI-compatible, works with all providers)"""
         content = []
         for block in self.content:
+            # Skip empty content blocks
+            if block.is_empty():
+                continue
             if isinstance(block, TextContent):
                 content.append({"type": "text", "text": block.text})
             elif isinstance(block, ImageContent):

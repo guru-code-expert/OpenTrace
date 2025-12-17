@@ -142,7 +142,7 @@ class Optimizer(AbstractOptimizer):
     update(update_dict)
         Apply updates to trainable parameters.
     backward(node, *args, **kwargs)
-        Propagate feedback through the graph.
+        Propagate feedback through the graph. Feedback is passed in through *args and **kwargs.
     zero_feedback()
         Clear accumulated feedback from all parameters.
     save(path)
@@ -190,6 +190,12 @@ class Optimizer(AbstractOptimizer):
     GraphPropagator : Default feedback propagator
     ParameterNode : Parameters being optimized
     Projection : Constraints applied during optimization
+
+    Usage
+    --------
+    result = traced_computation(x)
+    optimizer.zero_feedback()
+    optimizer.backward(result, 'user feedback')
 
     Examples
     --------
@@ -368,9 +374,12 @@ class Optimizer(AbstractOptimizer):
         node : Node
             Starting node for backward propagation.
         *args
-            Additional arguments passed to node.backward().
+            Additional arguments passed to node.backward(*args, **kwargs).
+            This corresponds to the positional arguments in node.backward
         **kwargs
-            Additional keyword arguments passed to node.backward().
+            Additional keyword arguments passed to node.backward(*args, **kwargs).
+            This corresponds to the keyword arguments in node.backward
+            If 'propagator' is not provided, uses the optimizer's propagator.
 
         Returns
         -------
@@ -379,9 +388,15 @@ class Optimizer(AbstractOptimizer):
 
         Notes
         -----
-        Uses the optimizer's propagator for feedback processing.
+        Uses the optimizer's propagator for feedback processing by default.
+
+        Usage
+        ------
+        optimizer.backward(result, 'make this number bigger', propagator=custom_propagator)
+        optimizer.backward(result, feedback='make this number bigger')
         """
-        return node.backward(*args, propagator=self.propagator, **kwargs)
+        kwargs.setdefault('propagator', self.propagator)
+        return node.backward(*args, **kwargs)
 
     def save(self, path: str):
         """Save the optimizer state to a file."""

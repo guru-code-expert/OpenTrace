@@ -26,6 +26,7 @@ import pickle
 import re
 from typing import Dict, Any
 
+
 def value_to_image_content(value: Any) -> Optional[ImageContent]:
     """Convert a value to ImageContent if it's an image, otherwise return None.
     
@@ -41,6 +42,7 @@ def value_to_image_content(value: Any) -> Optional[ImageContent]:
     if not is_image(value):
         return None
     return ImageContent.build(value)
+
 
 class OptimizerPromptSymbolSet:
     """
@@ -207,6 +209,7 @@ class OptimizerPromptSymbolSetJSON(OptimizerPromptSymbolSet):
         optoprime_instance = OptoPrime()
         return optoprime_instance.extract_llm_suggestion(response)
 
+
 class OptimizerPromptSymbolSet2(OptimizerPromptSymbolSet):
     variables_section_title = "# Variables"
     inputs_section_title = "# Inputs"
@@ -229,6 +232,42 @@ class OptimizerPromptSymbolSet2(OptimizerPromptSymbolSet):
     name_tag = "name"
 
 
+@dataclass
+class FunctionFeedback:
+    """Container for structured feedback from function execution traces.
+
+    Used by OptoPrime to organize execution traces into a format suitable
+    for LLM-based optimization.
+
+    Attributes
+    ----------
+    graph : list[tuple[int, str]]
+        Topologically sorted function calls with (depth, representation) pairs.
+    documentation : dict[str, str]
+        Mapping of function names to their documentation strings.
+    others : dict[str, Any]
+        Intermediate variables with (data, description) tuples.
+    roots : dict[str, Any]
+        Input/root variables with (data, description) tuples.
+    output : dict[str, Any]
+        Output/leaf variables with (data, description) tuples.
+    user_feedback : Union[str, ContentBlockList]
+        User-provided feedback about the execution. May include images.
+
+    Notes
+    -----
+    This structure separates the execution trace into logical components
+    that can be formatted into prompts for LLM-based optimization.
+    """
+
+    graph: List[
+        Tuple[int, str]
+    ]  # Each item is is a representation of function call. The items are topologically sorted.
+    documentation: Dict[str, str]  # Function name and its documentationstring
+    others: Dict[str, Any]  # Intermediate variable names and their data
+    roots: Dict[str, Any]  # Root variable name and its data
+    output: Dict[str, Any]  # Leaf variable name and its data
+    user_feedback: Union[str, ContentBlockList]  # User feedback at the leaf of the graph (may include images)
 
 
 @dataclass
@@ -251,8 +290,7 @@ class ProblemInstance:
     inputs: ContentBlockList
     others: ContentBlockList
     outputs: ContentBlockList
-    feedback: str
-    context: Optional[str]
+    feedback: ContentBlockList  # May contain images mixed with text
 
     optimizer_prompt_symbol_set: OptimizerPromptSymbolSet
 
@@ -297,18 +335,8 @@ class ProblemInstance:
             inputs=self.inputs.to_text(),
             outputs=self.outputs.to_text(),
             others=self.others.to_text(),
-            feedback=self.feedback
+            feedback=self.feedback.to_text()
         )
-
-        context_section = dedent("""
-        
-        # Context
-        {context}
-        """)
-
-        if self.context is not None and self.context.strip() != "":
-            context_section = context_section.format(context=self.context)
-            optimization_query += context_section
 
         return optimization_query
 
@@ -324,7 +352,7 @@ class ProblemInstance:
                 from variables, inputs, others, or outputs.
         """
         blocks = ContentBlockList()
-        
+
         # Header sections (always text)
         header = dedent(f"""
         # Instruction
@@ -339,31 +367,32 @@ class ProblemInstance:
         # Variables
         """)
         blocks.append(header)
-        
+
         # Variables section (may contain images)
         blocks.extend(self.variables)
-        
+
         # Inputs section
         blocks.append("\n\n# Inputs\n")
         blocks.extend(self.inputs)
-        
+
         # Others section
         blocks.append("\n\n# Others\n")
         blocks.extend(self.others)
-        
+
         # Outputs section
         blocks.append("\n\n# Outputs\n")
         blocks.extend(self.outputs)
-        
-        # Feedback section
-        blocks.append(f"\n\n# Feedback\n{self.feedback}")
-        
+
+        # Feedback section (may contain images)
+        blocks.append("\n\n# Feedback\n")
+        blocks.extend(self.feedback)
+
         # Context section (optional)
         if self.context is not None and self.context.strip() != "":
             blocks.append(f"\n\n# Context\n{self.context}")
-        
+
         return blocks
-    
+
     def has_images(self) -> bool:
         """Check if this problem instance contains any images.
         
@@ -374,56 +403,62 @@ class ProblemInstance:
             bool: True if any field contains ImageContent blocks.
         """
         return any(
-            field.has_images() 
-            for field in [self.variables, self.inputs, self.others, self.outputs]
+            field.has_images()
+            for field in [self.variables, self.inputs, self.others, self.outputs, self.feedback]
         )
 
 
-class Context(ContentBlockList):
-    """Semantic wrapper providing context to the optimizer agent.
+class Content(ContentBlockList):
+    """Semantic wrapper providing multi-modal content for the optimizer agent.
     
     Inherits all ContentBlockList functionality (append, extend, has_images,
     to_text, __bool__, __repr__, etc.) with a flexible constructor that
     supports multiple input patterns.
+
+    The goal is to provide a flexible interface for user to add mixed text and image content to the optimizer agent.
+
+    Primary use cases:
+    - Building problem context for the optimizer agent
+    - Providing user feedback
     
     Creation patterns:
-    - Variadic: Context("text", image, "more text")
-    - Template: Context("See [IMAGE] here", images=[img])
-    - Empty: Context()
+    - Variadic: Content("text", image, "more text")
+    - Template: Content("See [IMAGE] here", images=[img])
+    - Empty: Content()
     
     Examples:
-        # Text-only context
-        ctx = Context("Important background information")
+        # Text-only content
+        ctx = Content("Important background information")
         
-        # Image context  
-        ctx = Context(ImageContent.build("diagram.png"))
+        # Image content  
+        ctx = Content(ImageContent.build("diagram.png"))
         
         # Mixed content (variadic mode)
-        ctx = Context(
+        ctx = Content(
             "Here's the diagram:",
             "diagram.png",  # auto-detected as image file
             "And the analysis."
         )
         
         # Template mode with placeholders
-        ctx = Context(
+        ctx = Content(
             "Compare [IMAGE] with [IMAGE]:",
             images=[img1, img2]
         )
         
         # Manual building
-        ctx = Context()
+        ctx = Content()
         ctx.append("Here's the relevant diagram:")
         ctx.append(ImageContent.build("diagram.png"))
     """
-    
+
     def __init__(
-        self, 
-        *args, 
-        images: Optional[List[Any]] = None, 
-        format: str = "PNG"
+            self,
+            *args,
+            images: Optional[List[Any]] = None,
+            format: str = "PNG"
     ):
-        """Initialize a Context from various input patterns.
+        """Initialize a Content from various input patterns.
         
         Supports two usage modes:
         
@@ -431,13 +466,13 @@ class Context(ContentBlockList):
         Pass any mix of text and image sources as arguments.
         Strings are auto-detected as text or image paths/URLs.
         
-            Context("Hello", some_image, "World")
-            Context("Check this:", "path/to/image.png")
+            Content("Hello", some_image, "World")
+            Content("Check this:", "path/to/image.png")
         
         **Mode 2: Template (images provided)**
         Pass a template string with [IMAGE] placeholders and a list of images.
         
-            Context(
+            Content(
                 "Compare [IMAGE] with [IMAGE]",
                 images=[img1, img2]
             )
@@ -455,14 +490,14 @@ class Context(ContentBlockList):
         """
         # Initialize empty list first
         super().__init__()
-        
+
         # Build content based on mode
         if images is not None:
             self._build_from_template(*args, images=images, format=format)
         elif args:
             self._build_from_variadic(*args, format=format)
         # else: empty context
-    
+
     def _build_from_variadic(self, *args, format: str = "PNG") -> None:
         """Populate self from variadic arguments.
         
@@ -478,25 +513,17 @@ class Context(ContentBlockList):
             if isinstance(arg, str):
                 # Check if it could be an image URL or file path
                 image_content = ImageContent.build(arg, format=format)
-                if image_content is not None:
+                if not image_content.is_empty():
                     self.append(image_content)
                 else:
                     # It's just text
                     self.append(arg)
-            else:
-                # Try to convert to image
-                image_content = ImageContent.build(arg, format=format)
-                if image_content is not None:
-                    self.append(image_content)
-                else:
-                    # Fallback: convert to string
-                    self.append(str(arg))
-    
+
     def _build_from_template(
-        self, 
-        *args, 
-        images: List[Any], 
-        format: str = "PNG"
+            self,
+            *args,
+            images: List[Any],
+            format: str = "PNG"
     ) -> None:
         """Populate self from template with [IMAGE] placeholders.
         
@@ -517,10 +544,10 @@ class Context(ContentBlockList):
                 "Template mode requires exactly one template string as the first argument. "
                 f"Got {len(args)} arguments."
             )
-        
+
         template = args[0]
         placeholder = DEFAULT_IMAGE_PLACEHOLDER
-        
+
         # Count placeholders
         placeholder_count = template.count(placeholder)
         if placeholder_count != len(images):
@@ -528,14 +555,14 @@ class Context(ContentBlockList):
                 f"Number of {placeholder} placeholders ({placeholder_count}) "
                 f"does not match number of images ({len(images)})"
             )
-        
+
         # Split template by placeholder and interleave with images
         parts = template.split(placeholder)
-        
+
         for i, part in enumerate(parts):
             if part:  # Add text part if non-empty
                 self.append(part)
-            
+
             # Add image after each part except the last
             if i < len(images):
                 image_content = ImageContent.build(images[i], format=format)
@@ -544,6 +571,10 @@ class Context(ContentBlockList):
                         f"Could not convert image at index {i} to ImageContent: {type(images[i])}"
                     )
                 self.append(image_content)
+
+# we provide two aliases for the Content class for semantic convenience
+Context = Content
+Feedback = Content
 
 class OptoPrimeV3(OptoPrime):
     # This is generic representation prompt, which just explains how to read the problem.
@@ -646,13 +677,13 @@ class OptoPrimeV3(OptoPrime):
             optimizer_prompt_symbol_set: OptimizerPromptSymbolSet = OptimizerPromptSymbolSet(),
             use_json_object_format=True,  # whether to use json object format for the response when calling LLM
             truncate_expression=truncate_expression,
-            problem_context: Optional[Context] = None,
+            problem_context: Optional[Content] = None,
             **kwargs,
     ):
         super().__init__(parameters, *args, propagator=propagator, **kwargs)
 
         self.truncate_expression = truncate_expression
-        self.problem_context: Optional[Context] = None
+        self.problem_context: Optional[Content] = None
 
         self.use_json_object_format = use_json_object_format if optimizer_prompt_symbol_set.expect_json and use_json_object_format else False
         self.ignore_extraction_error = ignore_extraction_error
@@ -714,7 +745,7 @@ class OptoPrimeV3(OptoPrime):
         """
         # Count image parameters
         image_params = [param for param in parameters if param.is_image]
-        
+
         if len(image_params) > 1:
             param_names = ', '.join([f"'{p.name}'" for p in image_params])
             raise AssertionError(
@@ -768,8 +799,8 @@ class OptoPrimeV3(OptoPrime):
             # Text-only context
             optimizer.add_context("Important background information")
         """
-        ctx = Context(*args, images=images, format=format)
-        
+        ctx = Content(*args, images=images, format=format)
+
         # Store the context
         if self.problem_context is None:
             self.problem_context = ctx
@@ -777,7 +808,7 @@ class OptoPrimeV3(OptoPrime):
             # Append to existing context with a newline separator
             self.problem_context.append("\n\n")
             self.problem_context.extend(ctx.to_content_blocks())
-        
+
     def initialize_instruct_prompt(self):
         self.representation_prompt = self.representation_prompt.format(
             variable_expression_format=dedent(f"""
@@ -873,24 +904,24 @@ class OptoPrimeV3(OptoPrime):
         For image values, the text before and after the image are separate blocks.
         """
         blocks = ContentBlockList()
-        
+
         for k, v in node_dict.items():
             value_data = v[0]
             constraint = v[1]
-            
+
             if "__code" not in k:
                 # Check if this is an image
                 image_content = value_to_image_content(value_data)
-                
+
                 if image_content is not None:
                     # Image node: output XML structure, then image, then closing
                     type_name = "image"
                     constraint_expr = f"<{constraint_tag}>\n{constraint}\n</{constraint_tag}>" if constraint is not None and node_tag == self.optimizer_prompt_symbol_set.variable_tag else ""
-                    
+
                     xml_text = f"<{node_tag} name=\"{k}\" type=\"{type_name}\">\n<{value_tag}>\n"
                     blocks.append(xml_text)
                     blocks.append(image_content)  # Image breaks the text flow
-                    
+
                     closing_text = f"\n</{value_tag}>\n{constraint_expr}</{node_tag}>\n\n" if constraint_expr else f"\n</{value_tag}>\n</{node_tag}>\n\n"
                     blocks.append(closing_text)
                 else:
@@ -912,35 +943,35 @@ class OptoPrimeV3(OptoPrime):
                 blocks.append(
                     f"<{node_tag} name=\"{k}\" type=\"code\">\n<{value_tag}>\n{signature}{func_body}\n</{value_tag}>\n{constraint_expr}\n</{node_tag}>\n\n"
                 )
-        
+
         return blocks
 
     def repr_node_value_compact_as_content_blocks(self, node_dict, node_tag="node",
-                                                   value_tag="value", constraint_tag="constraint") -> ContentBlockList:
+                                                  value_tag="value", constraint_tag="constraint") -> ContentBlockList:
         """Returns a ContentBlockList with compact representation, including images.
         
         Consecutive TextContent blocks are merged for efficiency.
         Non-image values are truncated. Images break the text flow.
         """
         blocks = ContentBlockList()
-        
+
         for k, v in node_dict.items():
             value_data = v[0]
             constraint = v[1]
-            
+
             if "__code" not in k:
                 # Check if this is an image
                 image_content = value_to_image_content(value_data)
-                
+
                 if image_content is not None:
                     # Image node: output XML structure, then image, then closing
                     type_name = "image"
                     constraint_expr = f"<{constraint_tag}>\n{constraint}\n</{constraint_tag}>" if constraint is not None and node_tag == self.optimizer_prompt_symbol_set.variable_tag else ""
-                    
+
                     xml_text = f"<{node_tag} name=\"{k}\" type=\"{type_name}\">\n<{value_tag}>\n"
                     blocks.append(xml_text)
                     blocks.append(image_content)  # Image breaks the text flow
-                    
+
                     closing_text = f"\n</{value_tag}>\n{constraint_expr}</{node_tag}>\n\n" if constraint_expr else f"\n</{value_tag}>\n</{node_tag}>\n\n"
                     blocks.append(closing_text)
                 else:
@@ -964,7 +995,7 @@ class OptoPrimeV3(OptoPrime):
                 blocks.append(
                     f"<{node_tag} name=\"{k}\" type=\"code\">\n<{value_tag}>\n{signature}{node_value}\n</{value_tag}>\n{constraint_expr}\n</{node_tag}>\n\n"
                 )
-        
+
         return blocks
 
     def construct_prompt(self, summary, mask=None, *args, **kwargs):
@@ -989,12 +1020,12 @@ class OptoPrimeV3(OptoPrime):
         system_prompt = (
                 self.representation_prompt + self.output_format_prompt
         )  # generic representation + output rule
-        
+
         problem_inst = self.problem_instance(summary, mask=mask)
-        
+
         # Build user prompt as ContentBlockList (auto-merges consecutive text)
         user_content_blocks = ContentBlockList()
-        
+
         # Add example if included
         if self.include_example:
             example_text = self.example_problem_template.format(
@@ -1012,13 +1043,13 @@ class OptoPrimeV3(OptoPrime):
         user_content_blocks.append(self.user_prompt_template.format(
             problem_instance=problem_inst.to_content_blocks(),
         ))
-        
+
         # Add final prompt
         var_names = ", ".join(k for k in summary.variables.keys())
         user_content_blocks.append(self.final_prompt.format(
             names=var_names,
         ))
-        
+
         return system_prompt, user_content_blocks
 
     def problem_instance(self, summary, mask=None):
@@ -1032,7 +1063,7 @@ class OptoPrimeV3(OptoPrime):
             ProblemInstance with content block fields for multimodal support.
         """
         mask = mask or []
-        
+
         # Use content block representations for multimodal support
         variables_content = (
             self.repr_node_value_as_content_blocks(
@@ -1074,7 +1105,7 @@ class OptoPrimeV3(OptoPrime):
             if self.optimizer_prompt_symbol_set.others_section_title not in mask
             else ContentBlockList()
         )
-        
+
         return ProblemInstance(
             instruction=self.objective if "#Instruction" not in mask else "",
             code=(
@@ -1091,8 +1122,8 @@ class OptoPrimeV3(OptoPrime):
             inputs=inputs_content,
             outputs=outputs_content,
             others=others_content,
-            feedback=summary.user_feedback if self.optimizer_prompt_symbol_set.feedback_section_title not in mask else "",
-            context=self.problem_context if self.optimizer_prompt_symbol_set.context_section_title not in mask else "",
+            feedback=ContentBlockList.ensure(
+                summary.user_feedback) if self.optimizer_prompt_symbol_set.feedback_section_title not in mask else ContentBlockList(),
             optimizer_prompt_symbol_set=self.optimizer_prompt_symbol_set
         )
 
@@ -1110,7 +1141,7 @@ class OptoPrimeV3(OptoPrime):
         """
         assert isinstance(self.propagator, GraphPropagator)
         summary = self.summarize()
-        
+
         system_prompt, user_prompt = self.construct_prompt(summary, mask=mask)
 
         response = self.call_llm(
@@ -1185,7 +1216,7 @@ class OptoPrimeV3(OptoPrime):
 
         # Create user turn with content
         user_turn = UserTurn()
-        
+
         # Add content blocks from user_prompt
         for block in user_prompt:
             if isinstance(block, TextContent):
@@ -1193,7 +1224,7 @@ class OptoPrimeV3(OptoPrime):
             elif isinstance(block, ImageContent):
                 user_turn.content.append(block)
             # Handle other content types if needed
-        
+
         self.conversation_history.add_user_turn(user_turn)
 
         # Get messages with conversation length control (truncate from start)
