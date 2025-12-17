@@ -13,7 +13,8 @@ from opto.trace.nodes import ParameterNode, is_image
 
 from opto.optimizers.optoprime_v3 import OptoPrimeV3, OptimizerPromptSymbolSet
 from opto.optimizers.backbone import (
-    ContentBlock, TextContent, ImageContent, ContentBlockList
+    ContentBlock, TextContent, ImageContent, ContentBlockList,
+    DEFAULT_IMAGE_PLACEHOLDER
 )
 
 # Not inheriting from optoprime_v2 because this should have a smaller set
@@ -148,17 +149,15 @@ class ProblemInstance:
 
     @staticmethod
     def _content_to_text(content: Union[str, List[ContentBlock]]) -> str:
-        """Convert content (str or List[ContentBlock]) to text representation."""
+        """Convert content (str or List[ContentBlock]) to text representation.
+        
+        Handles both string content and ContentBlockList/List[ContentBlock].
+        Uses ContentBlockList.blocks_to_text for list content.
+        """
         if isinstance(content, str):
             return content
-        # Extract text from content blocks, skip images
-        text_parts = []
-        for block in content:
-            if isinstance(block, TextContent):
-                text_parts.append(block.text)
-            elif isinstance(block, ImageContent):
-                text_parts.append("[IMAGE]")
-        return "".join(text_parts)
+        # Use the shared utility from ContentBlockList
+        return ContentBlockList.blocks_to_text(content, DEFAULT_IMAGE_PLACEHOLDER)
 
     def __repr__(self) -> str:
         """Return text-only representation for backward compatibility."""

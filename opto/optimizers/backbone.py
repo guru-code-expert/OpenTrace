@@ -3,21 +3,22 @@ Flexible conversation manager for multi-turn LLM conversations.
 Uses LiteLLM unified format for all providers (OpenAI, Anthropic, Google, etc.).
 """
 
-from typing import List, Dict, Any, Optional, Literal, Union
+from typing import List, Dict, Any, Optional, Literal, Union, Iterable
 from dataclasses import dataclass, field
 import json
 import base64
 from pathlib import Path
 import warnings
 
-from abc import ABC, abstractmethod
+
+# Default placeholder for images that cannot be rendered as text
+DEFAULT_IMAGE_PLACEHOLDER = "[IMAGE]"
 
 
 @dataclass
-class ContentBlock(ABC):
+class ContentBlock:
     """Abstract base class for all content blocks."""
     
-    @abstractmethod
     def to_dict(self) -> Dict[str, Any]:
         """Convert the content block to a dictionary representation.
         
@@ -140,6 +141,86 @@ class ContentBlockList(list):
             return result
         else:
             return NotImplemented
+
+    # --- Multimodal utilities ---
+    
+    @staticmethod
+    def blocks_to_text(blocks: Iterable['ContentBlock'], 
+                       image_placeholder: str = DEFAULT_IMAGE_PLACEHOLDER) -> str:
+        """Convert any iterable of ContentBlocks to text representation.
+        
+        This is a utility that can be used by composite classes containing
+        multiple ContentBlockLists.
+        
+        Args:
+            blocks: Iterable of ContentBlock objects
+            image_placeholder: Placeholder string for images (default: "[IMAGE]")
+            
+        Returns:
+            str: Text representation where images are replaced with placeholder.
+        """
+        text_parts = []
+        for block in blocks:
+            if isinstance(block, TextContent):
+                text_parts.append(block.text)
+            elif isinstance(block, ImageContent):
+                text_parts.append(image_placeholder)
+        return "".join(text_parts)
+    
+    def to_text(self, image_placeholder: str = DEFAULT_IMAGE_PLACEHOLDER) -> str:
+        """Convert this list to text representation.
+        
+        Args:
+            image_placeholder: Placeholder string for images (default: "[IMAGE]")
+            
+        Returns:
+            str: Text representation where images are replaced with placeholder.
+        """
+        return self.blocks_to_text(self, image_placeholder)
+    
+    def has_images(self) -> bool:
+        """Check if any image content exists in this list.
+        
+        Returns:
+            bool: True if any ImageContent block is present.
+        """
+        return any(isinstance(block, ImageContent) for block in self)
+    
+    def __bool__(self) -> bool:
+        """Check if there's any actual content (not just empty text).
+        
+        Returns:
+            bool: True if content is non-empty (has images or non-whitespace text).
+        """
+        for block in self:
+            if isinstance(block, ImageContent):
+                return True
+            if isinstance(block, TextContent) and block.text.strip():
+                return True
+        return False
+    
+    def __repr__(self) -> str:
+        """Return text-only representation for logging.
+        
+        Images are represented as "[IMAGE]" placeholder.
+        
+        Returns:
+            str: Text representation of the content.
+        """
+        return self.to_text()
+    
+    def to_content_blocks(self) -> 'ContentBlockList':
+        """Return self (for interface compatibility with composites).
+        
+        This allows ContentBlockList and classes that inherit from it
+        to be used interchangeably with composite classes that have
+        a to_content_blocks() method.
+        
+        Returns:
+            ContentBlockList: Self reference.
+        """
+        return self
+
 
 @dataclass
 class TextContent(ContentBlock):
@@ -584,7 +665,6 @@ class ToolDefinition(ContentBlock):
             result["strict"] = self.strict
         result.update(self.extra)
         return result
-
 
 @dataclass
 class UserTurn:
