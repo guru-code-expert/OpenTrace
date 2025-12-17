@@ -17,7 +17,7 @@ from opto.trace.propagators.propagators import Propagator
 from opto.utils.llm import AbstractModel, LLM
 from opto.optimizers.buffers import FIFOBuffer
 from opto.optimizers.backbone import (
-    ConversationHistory, UserTurn, AssistantTurn,
+    ConversationHistory, UserTurn, AssistantTurn, PromptTemplate,
     ContentBlock, TextContent, ImageContent, ContentBlockList,
     DEFAULT_IMAGE_PLACEHOLDER
 )
@@ -587,7 +587,7 @@ class OptoPrimeV3(OptoPrime):
         """
     )
 
-    example_problem_template = dedent(
+    example_problem_template = PromptTemplate(dedent(
         """
         Here is an example of problem instance and response:
 
@@ -598,9 +598,9 @@ class OptoPrimeV3(OptoPrime):
         Your response:
         {example_response}
         """
-    )
+    ))
 
-    user_prompt_context_template = dedent(
+    user_prompt_context_template = PromptTemplate(dedent(
         """
         Now you see a new problem instance. Here is some context for this problem:
         
@@ -608,9 +608,9 @@ class OptoPrimeV3(OptoPrime):
         {context}
         ================================
         """
-    )
+    ))
 
-    user_prompt_template = dedent(
+    user_prompt_template = PromptTemplate(dedent(
         """
         Now you see problem instance:
 
@@ -619,7 +619,7 @@ class OptoPrimeV3(OptoPrime):
         ================================
 
         """
-    )
+    ))
 
     final_prompt = dedent(
         """
