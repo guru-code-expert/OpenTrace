@@ -7,7 +7,7 @@ Key difference to v2:
 import json
 from typing import Any, List, Dict, Union, Tuple, Optional
 from dataclasses import dataclass, field, asdict
-from opto.optimizers.optoprime import OptoPrime, FunctionFeedback
+from opto.optimizers.optoprime import OptoPrime, node_to_function_feedback
 from opto.trace.utils import dedent
 from opto.optimizers.utils import truncate_expression, extract_xml_like_data
 from opto.trace.nodes import ParameterNode, Node, MessageNode, is_image
@@ -493,12 +493,16 @@ class Content(ContentBlockList):
 
         # Build content based on mode
         if images is not None:
-            self._build_from_template(*args, images=images, format=format)
+            if len(args) != 1 or not isinstance(args[0], str):
+                raise ValueError(
+                    "Template mode requires exactly one template string as the first argument. "
+                    f"Got {len(args)} arguments."
+                )
+            self._build_from_template(args[0], images=images, format=format)
         elif args:
-            self._build_from_variadic(*args, format=format)
-        # else: empty context
+            self._build_from_variadic(*args)
 
-    def _build_from_variadic(self, *args, format: str = "PNG") -> None:
+    def _build_from_variadic(self, *args) -> None:
         """Populate self from variadic arguments.
         
         Each argument is either text (str) or an image source.
@@ -510,18 +514,17 @@ class Content(ContentBlockList):
             format: Image format for numpy arrays
         """
         for arg in args:
-            if isinstance(arg, str):
-                # Check if it could be an image URL or file path
-                image_content = ImageContent.build(arg, format=format)
-                if not image_content.is_empty():
-                    self.append(image_content)
-                else:
-                    # It's just text
-                    self.append(arg)
+            # for Future expansion, we can check if the string is any special content type 
+            # by is_empty() on special ContentBlock subclasses
+            image_content = ImageContent.build(arg)
+            if not image_content.is_empty():
+                self.append(image_content)
+            else:
+                self.append(arg)
 
     def _build_from_template(
             self,
-            *args,
+            template: str,
             images: List[Any],
             format: str = "PNG"
     ) -> None:
@@ -531,21 +534,13 @@ class Content(ContentBlockList):
         by images from the images list in order.
         
         Args:
-            *args: Should be a single template string containing [IMAGE] placeholders
+            template: Template string containing [IMAGE] placeholders
             images: List of image sources to insert at placeholders
             format: Image format for numpy arrays
             
         Raises:
-            ValueError: If args is not a single string, or if placeholder count
-                       doesn't match the number of images.
+            ValueError: If placeholder count doesn't match the number of images.
         """
-        if len(args) != 1 or not isinstance(args[0], str):
-            raise ValueError(
-                "Template mode requires exactly one template string as the first argument. "
-                f"Got {len(args)} arguments."
-            )
-
-        template = args[0]
         placeholder = DEFAULT_IMAGE_PLACEHOLDER
 
         # Count placeholders
@@ -571,6 +566,12 @@ class Content(ContentBlockList):
                         f"Could not convert image at index {i} to ImageContent: {type(images[i])}"
                     )
                 self.append(image_content)
+    
+    def ensure(self, *args, **kwargs) -> 'Content':
+        """Ensure the value is a Content object."""
+        if len(args) == 1 and isinstance(args[0], Content):
+            return args[0]
+        return Content(args, **kwargs)
 
 # we provide two aliases for the Content class for semantic convenience
 Context = Content
@@ -683,7 +684,7 @@ class OptoPrimeV3(OptoPrime):
         super().__init__(parameters, *args, propagator=propagator, **kwargs)
 
         self.truncate_expression = truncate_expression
-        self.problem_context: Optional[Content] = None
+        self.problem_context: Optional[Content] = problem_context
 
         self.use_json_object_format = use_json_object_format if optimizer_prompt_symbol_set.expect_json and use_json_object_format else False
         self.ignore_extraction_error = ignore_extraction_error
@@ -755,22 +756,22 @@ class OptoPrimeV3(OptoPrime):
 
     def add_context(self, *args, images: Optional[List[Any]] = None, format: str = "PNG"):
         """Add context to the optimizer, supporting both text and images.
-        
+
         Two usage patterns are supported:
-        
+
         **Usage 1: Variadic arguments (alternating text and images)**
-        
+
             optimizer.add_context("text part 1", image_link, "text part 2", image_file)
-            
+
         Each argument is either a string (text) or an image source.
-        
+
         **Usage 2: Template with placeholders**
-        
+
             optimizer.add_context(
-                "text part 1 [IMAGE] text part 2 [IMAGE]", 
+                "text part 1 [IMAGE] text part 2 [IMAGE]",
                 images=[image_link, image_file]
             )
-            
+
         The text contains `[IMAGE]` placeholders that are replaced by images
         from the `images` list in order. The number of placeholders must match
         the number of images.
@@ -998,6 +999,62 @@ class OptoPrimeV3(OptoPrime):
 
         return blocks
 
+    def summarize(self):
+        """Aggregate feedback from parameters into a structured summary.
+
+        Collects and organizes feedback from all trainable parameters into
+        a FunctionFeedback structure suitable for problem representation.
+
+        Returns
+        -------
+        FunctionFeedback
+            Structured feedback containing:
+            - variables: Trainable parameters with values and descriptions
+            - inputs: Non-trainable root nodes
+            - graph: Topologically sorted function calls
+            - others: Intermediate computation values
+            - output: Final output values
+            - documentation: Function documentation strings
+            - user_feedback: Aggregated user feedback
+
+        Notes
+        -----
+        The method performs several transformations:
+        1. Aggregates feedback from all trainable parameters
+        2. Converts the trace graph to FunctionFeedback structure
+        3. Separates root nodes into variables (trainable) and inputs (non-trainable)
+        4. Preserves the computation graph and intermediate values
+
+        Parameters without feedback (disconnected from output) are still
+        included in the summary but may not receive updates.
+        """
+        # Aggregate feedback from all the parameters
+        feedbacks = [
+            self.propagator.aggregate(node.feedback)
+            for node in self.parameters
+            if node.trainable
+        ]
+        summary = sum(feedbacks)  # TraceGraph
+        # Construct variables and update others
+        # Some trainable nodes might not receive feedback, because they might not be connected to the output
+        summary = node_to_function_feedback(summary)
+        # Classify the root nodes into variables and others
+        # summary.variables = {p.py_name: p.data for p in self.parameters if p.trainable and p.py_name in summary.roots}
+
+        trainable_param_dict = {p.py_name: p for p in self.parameters if p.trainable}
+        summary.variables = {
+            py_name: data
+            for py_name, data in summary.roots.items()
+            if py_name in trainable_param_dict
+        }
+        summary.inputs = {
+            py_name: data
+            for py_name, data in summary.roots.items()
+            if py_name not in trainable_param_dict
+        }  # non-variable roots
+
+        return summary
+
     def construct_prompt(self, summary, mask=None, *args, **kwargs):
         """Construct the system and user prompt.
 
@@ -1034,7 +1091,7 @@ class OptoPrimeV3(OptoPrime):
             )
             user_content_blocks.append(example_text)
 
-        # Add contecxt here
+        # Add context here
         user_content_blocks.append(self.user_prompt_context_template.format(
             user_prompt_context=self.problem_context,
         ))
@@ -1052,7 +1109,7 @@ class OptoPrimeV3(OptoPrime):
 
         return system_prompt, user_content_blocks
 
-    def problem_instance(self, summary, mask=None):
+    def problem_instance(self, summary: FunctionFeedback, mask=None):
         """Create a ProblemInstance from the summary.
         
         Args:
@@ -1122,8 +1179,8 @@ class OptoPrimeV3(OptoPrime):
             inputs=inputs_content,
             outputs=outputs_content,
             others=others_content,
-            feedback=ContentBlockList.ensure(
-                summary.user_feedback) if self.optimizer_prompt_symbol_set.feedback_section_title not in mask else ContentBlockList(),
+            feedback=Content.ensure(
+                summary.user_feedback) if self.optimizer_prompt_symbol_set.feedback_section_title not in mask else Content(""),
             optimizer_prompt_symbol_set=self.optimizer_prompt_symbol_set
         )
 

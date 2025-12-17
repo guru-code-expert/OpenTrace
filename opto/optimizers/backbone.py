@@ -1,9 +1,9 @@
 """
 Flexible conversation manager for multi-turn LLM conversations.
 Uses LiteLLM unified format for all providers (OpenAI, Anthropic, Google, etc.).
-"""
 
-from typing import List, Dict, Any, Optional, Literal, Union, Iterable
+"""
+from typing import List, Dict, Any, Optional, Literal, Union, Iterable, Tuple
 from dataclasses import dataclass, field
 import json
 import base64
@@ -14,10 +14,13 @@ import warnings
 # Default placeholder for images that cannot be rendered as text
 DEFAULT_IMAGE_PLACEHOLDER = "[IMAGE]"
 
-
 @dataclass
 class ContentBlock:
     """Abstract base class for all content blocks."""
+
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert the content block to a dictionary representation.
@@ -108,15 +111,15 @@ class ContentBlockList(list):
                   they are merged into a single TextContent.
         """
         if isinstance(item, str):
-            # String: merge with last TextContent or create new one
+            # String: merge with last TextContent or create new one (with a separation mark " ")
             if self and isinstance(self[-1], TextContent):
-                self[-1] = TextContent(text=self[-1].text + item)
+                self[-1] = TextContent(text=self[-1].text + " " + item)
             else:
                 super().append(TextContent(text=item))
         elif isinstance(item, TextContent):
-            # TextContent: merge with last TextContent or add
+            # TextContent: merge with last TextContent or add (with a separation mark " ")
             if self and isinstance(self[-1], TextContent):
-                self[-1] = TextContent(text=self[-1].text + item.text)
+                self[-1] = TextContent(text=self[-1].text + " " + item.text)
             else:
                 super().append(item)
         else:
@@ -124,7 +127,8 @@ class ContentBlockList(list):
             super().append(item)
         return self
     
-    def extend(self, blocks: Union[str, 'ContentBlock', List['ContentBlock'], 'ContentBlockList', None]) -> 'ContentBlockList':
+    def extend(self, blocks: Union[str, 'ContentBlock', List[
+        'ContentBlock'], 'ContentBlockList', None]) -> 'ContentBlockList':
         """Extend with blocks, merging consecutive TextContent.
         
         Args:
@@ -163,10 +167,24 @@ class ContentBlockList(list):
         else:
             return NotImplemented
 
+    def is_empty(self) -> bool:
+        """Check if the content block list is empty."""
+        if len(self) == 0:
+            return True
+        return all(block.is_empty() for block in self)
+    
+    def has_images(self) -> bool:
+        """Check if the content block list contains any images."""
+        return any(isinstance(block, ImageContent) for block in self)
+    
+    def has_text(self) -> bool:
+        """Check if the content block list contains any text."""
+        return any(isinstance(block, TextContent) for block in self)
+
     # --- Multimodal utilities ---
     
     @staticmethod
-    def blocks_to_text(blocks: Iterable['ContentBlock'], 
+    def blocks_to_text(blocks: Iterable['ContentBlock'],
                        image_placeholder: str = DEFAULT_IMAGE_PLACEHOLDER) -> str:
         """Convert any iterable of ContentBlocks to text representation.
         
@@ -437,9 +455,8 @@ class TextContent(ContentBlock):
     type: Literal["text"] = "text"
     text: str = ""
 
-    def __post_init__(self):
-        # Ensure type is always "text" (fixes issue when user passes positional arg)
-        object.__setattr__(self, 'type', 'text')
+    def __init__(self, text: str = ""):
+        super().__init__(text=text)
 
     def is_empty(self) -> bool:
         """Check if the text content is empty."""
@@ -511,9 +528,34 @@ class ImageContent(ContentBlock):
     media_type: str = "image/jpeg"  # image/jpeg, image/png, image/gif, image/webp
     detail: Optional[str] = None  # OpenAI: "auto", "low", "high"
 
-    def __post_init__(self):
-        # Ensure type is always "image" (fixes issue when user passes positional arg)
-        object.__setattr__(self, 'type', 'image')
+    def __init__(self, value: Any = None, format: str = "PNG", **kwargs):
+        """Initialize ImageContentBlock with auto-detection of input type.
+        
+        Args:
+            value: Can be:
+                - URL string (starting with 'http://' or 'https://')
+                - Data URL string (starting with 'data:image/')
+                - Local file path (string)
+                - Numpy array or array-like RGB image
+                - PIL Image object
+                - Raw bytes
+                - None (empty image)
+            format: Image format for numpy arrays (PNG, JPEG, etc.). Default: PNG
+            **kwargs: Direct field values (image_url, image_data, media_type, detail)
+        """
+        # If explicit field values are provided, use them directly
+        if kwargs:
+            kwargs.setdefault('type', 'image')
+            kwargs.setdefault('media_type', 'image/jpeg')
+            super().__init__(**kwargs)
+        else:
+            # Use autocast to detect and convert the value
+            image_url, image_data, media_type = self.autocast(value, format=format)
+            super().__init__(
+                image_url=image_url,
+                image_data=image_data,
+                media_type=media_type,
+            )
 
     def is_empty(self) -> bool:
         """Check if the image content is empty (no URL or data)."""
@@ -682,6 +724,123 @@ class ImageContent(ContentBlock):
             # Fallback: assume the whole thing is base64 data
             return cls(image_data=data_url.split(',')[-1], media_type="image/jpeg")
 
+    @staticmethod
+    def autocast(value: Any, format: str = "PNG") -> Tuple[Optional[str], Optional[str], str]:
+        """Auto-detect value type and return image field values.
+        
+        Args:
+            value: Can be:
+                - URL string (starting with 'http://' or 'https://')
+                - Data URL string (starting with 'data:image/')
+                - Local file path (string)
+                - Numpy array or array-like RGB image
+                - PIL Image object
+                - Raw bytes
+                - None (empty image)
+            format: Image format for numpy arrays (PNG, JPEG, etc.). Default: PNG
+        
+        Returns:
+            Tuple of (image_url, image_data, media_type)
+        """
+        # Handle None or empty
+        if value is None:
+            return (None, None, "image/jpeg")
+        
+        # Handle ImageContentBlock instance
+        if isinstance(value, ImageContent):
+            return (value.image_url, value.image_data, value.media_type)
+        
+        # Handle string inputs
+        if isinstance(value, str):
+            if not value.strip():
+                return (None, None, "image/jpeg")
+            
+            # Data URL
+            if value.startswith('data:image/'):
+                try:
+                    header, b64_data = value.split(',', 1)
+                    media_type = header.split(':')[1].split(';')[0]
+                    return (None, b64_data, media_type)
+                except (ValueError, IndexError):
+                    return (None, value.split(',')[-1], "image/jpeg")
+            
+            # HTTP/HTTPS URL
+            if value.startswith('http://') or value.startswith('https://'):
+                return (value, None, "image/jpeg")
+            
+            # File path
+            path = Path(value)
+            if path.exists():
+                ext_to_type = {
+                    '.jpg': 'image/jpeg',
+                    '.jpeg': 'image/jpeg',
+                    '.png': 'image/png',
+                    '.gif': 'image/gif',
+                    '.webp': 'image/webp'
+                }
+                media_type = ext_to_type.get(path.suffix.lower(), 'image/jpeg')
+                with open(value, 'rb') as f:
+                    image_data = base64.b64encode(f.read()).decode('utf-8')
+                return (None, image_data, media_type)
+            
+            return (None, None, "image/jpeg")
+        
+        # Handle bytes
+        if isinstance(value, bytes):
+            image_data = base64.b64encode(value).decode('utf-8')
+            return (None, image_data, "image/jpeg")
+        
+        # Handle PIL Image
+        try:
+            from PIL import Image
+            if isinstance(value, Image.Image):
+                import io
+                buffer = io.BytesIO()
+                img_format = value.format or format.upper()
+                value.save(buffer, format=img_format)
+                buffer.seek(0)
+                image_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                media_type = f"image/{img_format.lower()}"
+                return (None, image_data, media_type)
+        except ImportError:
+            pass
+        
+        # Handle numpy array or array-like
+        try:
+            import numpy as np
+            if isinstance(value, np.ndarray) or hasattr(value, '__array__'):
+                try:
+                    from PIL import Image
+                except ImportError:
+                    raise ImportError("Pillow is required for array conversion. Install with: pip install Pillow")
+                
+                import io
+                
+                if not isinstance(value, np.ndarray):
+                    value = np.array(value)
+                
+                # Normalize to [0, 255] if needed
+                if value.dtype == np.float32 or value.dtype == np.float64:
+                    if value.max() <= 1.0:
+                        value = (value * 255).astype(np.uint8)
+                    else:
+                        value = value.astype(np.uint8)
+                elif value.dtype != np.uint8:
+                    value = value.astype(np.uint8)
+                
+                image = Image.fromarray(value)
+                buffer = io.BytesIO()
+                image.save(buffer, format=format.upper())
+                buffer.seek(0)
+                
+                image_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                media_type = f"image/{format.lower()}"
+                return (None, image_data, media_type)
+        except ImportError:
+            pass
+        
+        return (None, None, "image/jpeg")
+
     @classmethod
     def build(cls, value: Any, format: str = "PNG") -> 'ImageContent':
         """Auto-detect format and create ImageContent from various input types.
@@ -699,51 +858,12 @@ class ImageContent(ContentBlock):
         Returns:
             ImageContent or None if the value cannot be converted
         """
-        # handle None
-        if not value:
-            return cls()
-
-        # handle self
+        # Handle ImageContentBlock instance directly
         if isinstance(value, cls):
             return value
-
-        if not value.strip():
-            return cls()
-
-        # Handle string inputs
-        if isinstance(value, str):
-            # Data URL
-            if value.startswith('data:image/'):
-                return cls.from_data_url(value)
-            # HTTP/HTTPS URL
-            if value.startswith('http://') or value.startswith('https://'):
-                return cls.from_url(value)
-            # Assume it's a file path
-            if Path(value).exists():
-                return cls.from_file(value)
-            return cls()
         
-        # Handle bytes
-        if isinstance(value, bytes):
-            return cls.from_bytes(value)
-        
-        # Handle PIL Image
-        try:
-            from PIL import Image
-            if isinstance(value, Image.Image):
-                return cls.from_pil(value, format=format)
-        except ImportError:
-            pass
-        
-        # Handle numpy array or array-like
-        try:
-            import numpy as np
-            if isinstance(value, np.ndarray) or hasattr(value, '__array__'):
-                return cls.from_array(value, format=format)
-        except ImportError:
-            pass
-        
-        return cls()
+        image_url, image_data, media_type = cls.autocast(value, format=format)
+        return cls(image_url=image_url, image_data=image_data, media_type=media_type)
 
     def set_image(self, image: Any, format: str = "PNG") -> None:
         """Set the image from various input formats (mutates self).
@@ -763,7 +883,6 @@ class ImageContent(ContentBlock):
             self.image_url = result.image_url
             self.image_data = result.image_data
             self.media_type = result.media_type
-
 
 @dataclass
 class PDFContent(ContentBlock):
@@ -935,7 +1054,6 @@ class FileContent(ContentBlock):
             mime_type=mime_type,
             is_binary=is_binary
         )
-
 
 # Union type alias for common content types (for type hints)
 # Note: ContentBlock remains the abstract base class for inheritance
