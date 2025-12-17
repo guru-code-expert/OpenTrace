@@ -644,6 +644,11 @@ class PrioritySearch(SearchTemplate):
         results = {}  # dict of ModuleCandidate id: (ModuleCandidate, list of rollouts)
         for c, rollouts in matched_candidates_and_samples.items():  # rollouts is a list of BatchRollouts
             results[c] = [ r for rr in rollouts for r in rr.to_list()]  # we only need the list of dicts
+        # Add exploration candidates that weren't included in match_candidates_and_samples
+        # This ensures they get re-added to memory even if they weren't validated again
+        for candidate in exploration_candidates:
+            if candidate not in results:
+                results[candidate] = []  # Add with empty rollouts list
 
         return results
 
