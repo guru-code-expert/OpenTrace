@@ -27,6 +27,19 @@ class ContentBlock:
         """
         raise NotImplementedError("Subclasses must implement this method")
 
+    @classmethod
+    def build(cls, value: Any, **kwargs) -> 'ContentBlock':
+        """Build a content block from a value with auto-detection.
+        
+        Args:
+            value: The value to build from (type depends on subclass)
+            **kwargs: Additional keyword arguments for building
+        
+        Returns:
+            ContentBlock: The built content block
+        """
+        raise NotImplementedError("Subclasses must implement this method")
+
 class ContentBlockList(list):
     """List of content blocks with automatic type conversion.
     
@@ -416,6 +429,21 @@ class TextContent(ContentBlock):
     type: Literal["text"] = "text"
     text: str = ""
 
+    @classmethod
+    def build(cls, value: Any = "", **kwargs) -> 'TextContent':
+        """Build a text content block from a value.
+        
+        Args:
+            value: String or any value to convert to text
+            **kwargs: Unused, for compatibility with base class
+        
+        Returns:
+            TextContent: Text content block with the value as text
+        """
+        if isinstance(value, str):
+            return cls(text=value)
+        return cls(text=str(value))
+
     def to_dict(self) -> Dict[str, Any]:
         return {"type": self.type, "text": self.text}
     
@@ -631,7 +659,7 @@ class ImageContent(ContentBlock):
             return cls(image_data=data_url.split(',')[-1], media_type="image/jpeg")
 
     @classmethod
-    def from_value(cls, value: Any, format: str = "PNG"):
+    def build(cls, value: Any, format: str = "PNG"):
         """Auto-detect format and create ImageContent from various input types.
         
         Args:
@@ -695,7 +723,7 @@ class ImageContent(ContentBlock):
                 - Raw bytes
             format: Image format for numpy arrays (PNG, JPEG, etc.). Default: PNG
         """
-        result = ImageContent.from_value(image, format=format)
+        result = ImageContent.build(image, format=format)
         if result:
             self.image_url = result.image_url
             self.image_data = result.image_data
@@ -703,12 +731,42 @@ class ImageContent(ContentBlock):
 
 
 @dataclass
-class PDFContent:
+class PDFContent(ContentBlock):
     """PDF content block"""
     type: Literal["pdf"] = "pdf"
     pdf_url: Optional[str] = None
     pdf_data: Optional[str] = None  # base64 encoded
     filename: Optional[str] = None
+
+    @classmethod
+    def build(cls, value: Any, **kwargs) -> 'PDFContent':
+        """Build a PDF content block from a value.
+        
+        Args:
+            value: Can be:
+                - URL string (starting with 'http://' or 'https://')
+                - Local file path (string)
+                - Raw bytes
+            **kwargs: Unused, for compatibility with base class
+        
+        Returns:
+            PDFContent or None if the value cannot be converted
+        """
+        if isinstance(value, str):
+            # HTTP/HTTPS URL
+            if value.startswith('http://') or value.startswith('https://'):
+                return cls(pdf_url=value)
+            # Assume it's a file path
+            if Path(value).exists():
+                return cls.from_file(value)
+            return None
+        
+        # Handle bytes
+        if isinstance(value, bytes):
+            pdf_data = base64.b64encode(value).decode('utf-8')
+            return cls(pdf_data=pdf_data)
+        
+        return None
 
     def to_dict(self) -> Dict[str, Any]:
         if self.pdf_url:
@@ -739,13 +797,52 @@ class PDFContent:
 
 
 @dataclass
-class FileContent:
+class FileContent(ContentBlock):
     """Generic file content block (for code, data files, etc.)"""
     file_data: str  # Could be text content or base64 for binary
     filename: str
     type: Literal["file"] = "file"
     mime_type: str = "text/plain"
     is_binary: bool = False
+
+    @classmethod
+    def build(cls, value: Any, **kwargs) -> 'FileContent':
+        """Build a file content block from a value.
+        
+        Args:
+            value: Can be:
+                - Local file path (string)
+                - Tuple of (filename, content) where content is str or bytes
+            **kwargs: Additional arguments like mime_type
+        
+        Returns:
+            FileContent or None if the value cannot be converted
+        """
+        mime_type = kwargs.get('mime_type')
+        
+        if isinstance(value, str):
+            # Assume it's a file path
+            if Path(value).exists():
+                return cls.from_file(value, mime_type=mime_type)
+            return None
+        
+        # Handle tuple of (filename, content)
+        if isinstance(value, tuple) and len(value) == 2:
+            filename, content = value
+            if isinstance(content, bytes):
+                file_data = base64.b64encode(content).decode('utf-8')
+                is_binary = True
+            else:
+                file_data = str(content)
+                is_binary = False
+            return cls(
+                file_data=file_data,
+                filename=filename,
+                mime_type=mime_type or 'application/octet-stream',
+                is_binary=is_binary
+            )
+        
+        return None
 
     def to_dict(self) -> Dict[str, Any]:
         return {

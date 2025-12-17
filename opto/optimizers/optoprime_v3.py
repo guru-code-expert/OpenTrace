@@ -9,7 +9,7 @@ from typing import Any, List, Dict, Union, Tuple, Optional
 from dataclasses import dataclass, field, asdict
 from opto.optimizers.optoprime import OptoPrime, FunctionFeedback
 from opto.trace.utils import dedent
-from opto.optimizers.utils import truncate_expression, extract_xml_like_data, MultiModalPayload
+from opto.optimizers.utils import truncate_expression, extract_xml_like_data
 from opto.trace.nodes import ParameterNode, Node, MessageNode, is_image
 from opto.trace.propagators import TraceGraph, GraphPropagator
 from opto.trace.propagators.propagators import Propagator
@@ -29,8 +29,8 @@ from typing import Dict, Any
 def value_to_image_content(value: Any) -> Optional[ImageContent]:
     """Convert a value to ImageContent if it's an image, otherwise return None.
     
-    Uses is_image() from opto.trace.nodes for validation (stricter than ImageContent.from_value,
-    e.g., only accepts URLs with image extensions), then delegates to ImageContent.from_value().
+    Uses is_image() from opto.trace.nodes for validation (stricter than ImageContent.build,
+    e.g., only accepts URLs with image extensions), then delegates to ImageContent.build().
     
     Supports (via is_image detection):
     - Base64 data URL strings (data:image/...)
@@ -40,7 +40,7 @@ def value_to_image_content(value: Any) -> Optional[ImageContent]:
     """
     if not is_image(value):
         return None
-    return ImageContent.from_value(value)
+    return ImageContent.build(value)
 
 class OptimizerPromptSymbolSet:
     """
@@ -396,7 +396,7 @@ class Context(ContentBlockList):
         ctx = Context("Important background information")
         
         # Image context  
-        ctx = Context(ImageContent.from_file("diagram.png"))
+        ctx = Context(ImageContent.build("diagram.png"))
         
         # Mixed content (variadic mode)
         ctx = Context(
@@ -414,7 +414,7 @@ class Context(ContentBlockList):
         # Manual building
         ctx = Context()
         ctx.append("Here's the relevant diagram:")
-        ctx.append(ImageContent.from_file("diagram.png"))
+        ctx.append(ImageContent.build("diagram.png"))
     """
     
     def __init__(
@@ -477,7 +477,7 @@ class Context(ContentBlockList):
         for arg in args:
             if isinstance(arg, str):
                 # Check if it could be an image URL or file path
-                image_content = ImageContent.from_value(arg, format=format)
+                image_content = ImageContent.build(arg, format=format)
                 if image_content is not None:
                     self.append(image_content)
                 else:
@@ -485,7 +485,7 @@ class Context(ContentBlockList):
                     self.append(arg)
             else:
                 # Try to convert to image
-                image_content = ImageContent.from_value(arg, format=format)
+                image_content = ImageContent.build(arg, format=format)
                 if image_content is not None:
                     self.append(image_content)
                 else:
@@ -538,7 +538,7 @@ class Context(ContentBlockList):
             
             # Add image after each part except the last
             if i < len(images):
-                image_content = ImageContent.from_value(images[i], format=format)
+                image_content = ImageContent.build(images[i], format=format)
                 if image_content is None:
                     raise ValueError(
                         f"Could not convert image at index {i} to ImageContent: {type(images[i])}"
@@ -653,7 +653,6 @@ class OptoPrimeV3(OptoPrime):
 
         self.truncate_expression = truncate_expression
         self.problem_context: Optional[Context] = None
-        self.multimodal_payload = MultiModalPayload()
 
         self.use_json_object_format = use_json_object_format if optimizer_prompt_symbol_set.expect_json and use_json_object_format else False
         self.ignore_extraction_error = ignore_extraction_error
@@ -1005,25 +1004,20 @@ class OptoPrimeV3(OptoPrime):
             user_content_blocks.append(example_text)
 
         # Add contecxt here
-        
-        # Add problem instance header
-        user_content_blocks.append(dedent("""
-        Now you see problem instance:
+        user_content_blocks.append(self.user_prompt_context_template.format(
+            user_prompt_context=self.problem_context,
+        ))
 
-        ================================
-        """))
+        # Add problem instance template
+        user_content_blocks.append(self.user_prompt_template.format(
+            problem_instance=problem_inst.to_content_blocks(),
+        ))
         
-        # Add problem instance content blocks (may contain images)
-        user_content_blocks.extend(problem_inst.to_content_blocks())
-        
-        # Add footer and final prompt
+        # Add final prompt
         var_names = ", ".join(k for k in summary.variables.keys())
-        
-        user_content_blocks.append(dedent("""
-        ================================
-
-        """))
-        user_content_blocks.append(self.final_prompt.format(names=var_names))
+        user_content_blocks.append(self.final_prompt.format(
+            names=var_names,
+        ))
         
         return system_prompt, user_content_blocks
 
@@ -1191,10 +1185,6 @@ class OptoPrimeV3(OptoPrime):
 
         # Create user turn with content
         user_turn = UserTurn()
-        
-        # Add image content from multimodal_payload if available (legacy path)
-        if self.multimodal_payload.image_data is not None:
-            user_turn.add_image(url=self.multimodal_payload.image_data)
         
         # Add content blocks from user_prompt
         for block in user_prompt:
