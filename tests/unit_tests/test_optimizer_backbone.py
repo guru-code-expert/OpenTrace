@@ -1,6 +1,11 @@
 """
 Comprehensive tests for optimizer backbone components (ConversationHistory, UserTurn, AssistantTurn)
 Tests include: truncation strategies, multimodal content, and conversation management
+
+We need to test a few things:
+1. Various use cases of ContentBlock and specialized ones
+2. UserTurn, AssistantTurn and conversation manager
+3. Multi-modal use of conversation manager, including multi-turn and image as output
 """
 import os
 import pytest
@@ -471,7 +476,7 @@ def test_real_llm_multi_turn_with_images():
     print("  Which of these flowers would be better for a romantic gift and why?")
     
     response2 = llm(messages=messages, max_tokens=300)
-    response2_content = response2.choices[0].message.content
+    response2_content = response2.choicbes[0].message.content
     
     print("\n🤖 Turn 2 - Assistant:")
     print(f"  {response2_content[:200]}...")
@@ -486,4 +491,26 @@ def test_real_llm_multi_turn_with_images():
         "Turn 2 response doesn't seem to reference the flower context"
     
     print("\n✅ Multi-turn conversation with images completed successfully!")
+
+if __name__ == '__main__':
+    import litellm
+    import base64
+
+    # Gemini image generation models don't require tools parameter
+    response = litellm.responses(
+        model="gemini/gemini-2.5-flash-image",
+        input="Generate a cute cat playing with yarn"
+    )
+
+    # Access generated images from output
+    for item in response.output:
+        if item.type == "image_generation_call":
+            # item.result contains pure base64 (no data: prefix)
+            image_bytes = base64.b64decode(item.result)
+
+            # Save the image
+            with open(f"generated_{item.id}.png", "wb") as f:
+                f.write(image_bytes)
+
+    print(f"Image saved: generated_{response.output[0].id}.png")
 

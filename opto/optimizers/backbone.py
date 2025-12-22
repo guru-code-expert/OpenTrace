@@ -1,7 +1,6 @@
 """
 Flexible conversation manager for multi-turn LLM conversations.
 Uses LiteLLM unified format for all providers (OpenAI, Anthropic, Google, etc.).
-
 """
 from typing import List, Dict, Any, Optional, Literal, Union, Iterable, Tuple
 from dataclasses import dataclass, field

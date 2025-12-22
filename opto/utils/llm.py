@@ -1,3 +1,10 @@
+"""
+This adapater is for three cases:
+1. OpenAI's response API (which is new and not fully supported by LiteLLM yet)
+2. Google's MultiPart API design (not supported by LiteLLM response API at all)
+3. Generic fallback option for all other providers (through LiteLLM)
+"""
+
 from typing import List, Tuple, Dict, Any, Callable, Union
 import os
 import time
@@ -5,6 +12,10 @@ import json
 import os
 import warnings
 from .auto_retry import retry_with_exponential_backoff
+
+import openai
+from google import genai
+from google.genai import types
 
 try:
     import autogen  # We import autogen here to avoid the need of installing autogen
@@ -249,10 +260,13 @@ class LiteLLM(AbstractModel):
     default model name through the environment variable TRACE_LITELLM_MODEL.
     When using Azure models via token provider, you can set the Azure token
     provider scope through the environment variable AZURE_TOKEN_PROVIDER_SCOPE.
+    
+    This class now supports storing default completion parameters (like temperature,
+    top_p, max_tokens, etc.) that will be used for all calls unless overridden.
     """
 
     def __init__(self, model: Union[str, None] = None, reset_freq: Union[int, None] = None,
-                 cache=True, max_retries=10, base_delay=1.0) -> None:
+                 cache=True, max_retries=10, base_delay=1.0, **default_params) -> None:
         if model is None:
             model = os.environ.get('TRACE_LITELLM_MODEL')
             if model is None:
@@ -261,11 +275,12 @@ class LiteLLM(AbstractModel):
 
         self.model_name = model
         self.cache = cache
-        factory = lambda: self._factory(self.model_name, max_retries=max_retries, base_delay=base_delay)  # an LLM instance uses a fixed model
+        self.default_params = default_params  # Store default completion parameters
+        factory = lambda: self._factory(self.model_name, self.default_params, max_retries=max_retries, base_delay=base_delay)
         super().__init__(factory, reset_freq)
 
     @classmethod
-    def _factory(cls, model_name: str, max_retries=10, base_delay=1.0):
+    def _factory(cls, model_name: str, default_params: dict, max_retries=10, base_delay=1.0):
         import litellm
         if model_name.startswith('azure/'):  # azure model
             azure_token_provider_scope = os.environ.get('AZURE_TOKEN_PROVIDER_SCOPE', None)
@@ -274,13 +289,13 @@ class LiteLLM(AbstractModel):
                 credential = get_bearer_token_provider(DefaultAzureCredential(), azure_token_provider_scope)
                 return lambda *args, **kwargs: retry_with_exponential_backoff(
                     lambda: litellm.completion(model_name, *args,
-                                             azure_ad_token_provider=credential, **kwargs),
+                                             azure_ad_token_provider=credential, **{**default_params, **kwargs}),
                     max_retries=max_retries,
                     base_delay=base_delay,
                     operation_name="LiteLLM_completion"
                 )
         return lambda *args, **kwargs: retry_with_exponential_backoff(
-            lambda: litellm.completion(model_name, *args, **kwargs),
+            lambda: litellm.completion(model_name, *args, **{**default_params, **kwargs}),
             max_retries=max_retries,
             base_delay=base_delay,
             operation_name="LiteLLM_completion"
@@ -340,75 +355,203 @@ _LLM_REGISTRY = {
 }
 
 class LLMFactory:
-    """Factory for creating LLM instances with predefined profiles.
+    """Factory for creating LLM instances with named profiles.
 
-    The code comes with these built-in profiles:
+    Profiles allow you to save and reuse LLM configurations with specific settings.
+    Each profile can include any LiteLLM-supported parameters like model, temperature,
+    top_p, max_tokens, etc.
 
-        llm_default = LLM(profile="default")     # gpt-4o-mini
-        llm_premium = LLM(profile="premium")     # gpt-4
-        llm_cheap = LLM(profile="cheap")         # gpt-4o-mini
-        llm_fast = LLM(profile="fast")           # gpt-3.5-turbo-mini
-        llm_reasoning = LLM(profile="reasoning") # o1-mini
+    The default profile uses 'gpt-4o-mini' with standard settings.
 
-    You can override those built-in profiles:
+    Basic Usage:
+        # Use default model (gpt-4o-mini)
+        llm = LLM()
+        
+        # Specify a model directly
+        llm = LLM(model="gpt-4o")
+        
+        # Use a named profile
+        llm = LLM(profile="my_profile")
 
-        LLMFactory.register_profile("default", "LiteLLM", model="gpt-4o", temperature=0.5)
-        LLMFactory.register_profile("premium", "LiteLLM", model="o1-preview", max_tokens=8000)
-        LLMFactory.register_profile("cheap", "LiteLLM", model="gpt-3.5-turbo", temperature=0.9)
-        LLMFactory.register_profile("fast", "LiteLLM", model="gpt-3.5-turbo", max_tokens=500)
-        LLMFactory.register_profile("reasoning", "LiteLLM", model="o1-preview")
+    Creating Custom Profiles:
+        # Register a profile with full LiteLLM configuration
+        LLMFactory.create_profile(
+            "creative_writer",
+            backend="LiteLLM",
+            model="gpt-4o",
+            temperature=0.9,
+            top_p=0.95,
+            max_tokens=2000,
+            presence_penalty=0.6
+        )
+        
+        # Register a reasoning profile
+        LLMFactory.create_profile(
+            "deep_thinker",
+            backend="LiteLLM",
+            model="o1-preview",
+            max_completion_tokens=8000
+        )
+        
+        # Register a profile with specific formatting
+        LLMFactory.create_profile(
+            "json_responder",
+            backend="LiteLLM",
+            model="gpt-4o-mini",
+            temperature=0.3,
+            response_format={"type": "json_object"}
+        )
 
-    An Example of using Different Backends
+    Using Profiles:
+        # Use your custom profile
+        llm = LLM(profile="creative_writer")
+        
+        # In optimizers
+        optimizer = OptoPrime(parameters, llm=LLM(profile="deep_thinker"))
 
-        # Register custom profiles for different use cases
-        LLMFactory.register_profile("advanced_reasoning", "LiteLLM", model="o1-preview", max_tokens=4000)
-        LLMFactory.register_profile("claude_sonnet", "LiteLLM", model="claude-3-5-sonnet-latest", temperature=0.3)
-        LLMFactory.register_profile("custom_server", "CustomLLM", model="llama-3.1-8b")
+    Profile Management:
+        # List all available profiles
+        profiles = LLMFactory.list_profiles()
+        
+        # Get profile configuration
+        config = LLMFactory.get_profile_info("creative_writer")
+        
+        # Override existing profile
+        LLMFactory.create_profile("default", "LiteLLM", model="gpt-4o", temperature=0.5)
 
-        # Use in different contexts
-        reasoning_llm = LLM(profile="advanced_reasoning")  # For complex reasoning
-        claude_llm = LLM(profile="claude_sonnet")          # For Claude responses
-        local_llm = LLM(profile="custom_server")           # For local deployment
-
-        # Single LLM optimizer with custom profile
-        optimizer1 = OptoPrime(parameters, llm=LLM(profile="advanced_reasoning"))
-
-        # Multi-LLM optimizer with multiple profiles
-        optimizer2 = OptoPrimeMulti(parameters, llm_profiles=["cheap", "premium", "claude_sonnet"], generation_technique="multi_llm")
+    Supported LiteLLM Parameters:
+        See https://docs.litellm.ai/docs/completion/input for full list:
+        - model: Model name (required)
+        - temperature: Sampling temperature (0-2)
+        - top_p: Nucleus sampling parameter
+        - max_tokens: Maximum tokens to generate
+        - max_completion_tokens: Upper bound for completion tokens
+        - presence_penalty: Penalize new tokens based on presence
+        - frequency_penalty: Penalize new tokens based on frequency
+        - stop: Stop sequences (string or list)
+        - stream: Enable streaming responses
+        - response_format: Output format specification
+        - seed: Deterministic sampling seed
+        - tools: Function calling tools
+        - tool_choice: Control function calling behavior
+        - logprobs: Return log probabilities
+        - top_logprobs: Number of most likely tokens to return
+        - n: Number of completions to generate
+        - and many more...
     """
 
-    # Default profiles for different use cases
+    # Default profile - just gpt-4o-mini with no opinionated settings
     _profiles = {
         'default': {'backend': 'LiteLLM', 'params': {'model': 'gpt-4o-mini'}},
-        'premium': {'backend': 'LiteLLM', 'params': {'model': 'gpt-4'}},
-        'cheap': {'backend': 'LiteLLM', 'params': {'model': 'gpt-4o-mini'}},
-        'fast': {'backend': 'LiteLLM', 'params': {'model': 'gpt-3.5-turbo-mini'}},
-        'reasoning': {'backend': 'LiteLLM', 'params': {'model': 'o1-mini'}},
     }
 
     @classmethod
-    def get_llm(cls, profile: str = 'default') -> AbstractModel:
-        """Get an LLM instance for the specified profile."""
+    def get_llm(cls, profile: str = 'default', model: str = None, **kwargs) -> AbstractModel:
+        """Get an LLM instance for the specified profile or model.
+        
+        Args:
+            profile: Name of the profile to use. Defaults to 'default'.
+            model: Model name to use directly. If provided, overrides profile.
+            **kwargs: Additional parameters to pass to the backend (e.g., temperature, top_p).
+                     These override profile settings if both are specified.
+        
+        Returns:
+            An LLM instance configured according to the profile/model and parameters.
+        
+        Examples:
+            # Use default profile
+            llm = LLMFactory.get_llm()
+            
+            # Use specific model
+            llm = LLMFactory.get_llm(model="gpt-4o")
+            
+            # Use named profile
+            llm = LLMFactory.get_llm(profile="creative_writer")
+            
+            # Use model with custom parameters
+            llm = LLMFactory.get_llm(model="gpt-4o", temperature=0.7, max_tokens=1000)
+            
+            # Override profile settings
+            llm = LLMFactory.get_llm(profile="creative_writer", temperature=0.5)
+        """
+        # If model is specified directly, create a simple config
+        if model is not None:
+            backend = kwargs.pop('backend', None)
+            if backend is None:
+                backend = 'LiteLLM'
+            backend_cls = _LLM_REGISTRY[backend]
+            params = {'model': model, **kwargs}
+            return backend_cls(**params)
+        
+        # Otherwise use profile
         if profile not in cls._profiles:
-            raise ValueError(f"Unknown profile '{profile}'. Available profiles: {list(cls._profiles.keys())}")
+            raise ValueError(
+                f"Unknown profile '{profile}'. Available profiles: {list(cls._profiles.keys())}. "
+                f"Use LLMFactory.create_profile() to create custom profiles, or pass model= directly."
+            )
 
-        config = cls._profiles[profile]
+        config = cls._profiles[profile].copy()
         backend_cls = _LLM_REGISTRY[config['backend']]
-        return backend_cls(**config['params'])
+        
+        # Merge profile params with any override kwargs
+        params = config['params'].copy()
+        params.update(kwargs)
+        
+        return backend_cls(**params)
 
     @classmethod
-    def register_profile(cls, name: str, backend: str, **params):
-        """Register a new LLM profile."""
+    def create_profile(cls, name: str, backend: str = 'LiteLLM', **params):
+        """Register a new LLM profile with custom configuration.
+        
+        Args:
+            name: Profile name to register.
+            backend: Backend to use ('LiteLLM', 'AutoGen', or 'CustomLLM'). Defaults to 'LiteLLM'.
+            **params: Configuration parameters for the backend. For LiteLLM, this can include
+                     any parameters from https://docs.litellm.ai/docs/completion/input
+        
+        Examples:
+            # Simple profile with just a model
+            LLMFactory.create_profile("gpt4", model="gpt-4o")
+            
+            # Profile with temperature and token settings
+            LLMFactory.create_profile(
+                "creative",
+                model="gpt-4o",
+                temperature=0.9,
+                max_tokens=2000
+            )
+            
+            # Profile with advanced settings
+            LLMFactory.create_profile(
+                "structured_json",
+                model="gpt-4o-mini",
+                temperature=0.3,
+                response_format={"type": "json_object"},
+                max_tokens=1500,
+                top_p=0.9
+            )
+        """
+        if backend not in _LLM_REGISTRY:
+            raise ValueError(
+                f"Unknown backend '{backend}'. Valid options: {list(_LLM_REGISTRY.keys())}"
+            )
         cls._profiles[name] = {'backend': backend, 'params': params}
 
     @classmethod
     def list_profiles(cls):
-        """List all available profiles."""
+        """List all available profile names."""
         return list(cls._profiles.keys())
 
     @classmethod
     def get_profile_info(cls, profile: str = None):
-        """Get information about a profile or all profiles."""
+        """Get configuration information about one or all profiles.
+        
+        Args:
+            profile: Profile name to get info for. If None, returns all profiles.
+        
+        Returns:
+            Dictionary with profile configuration(s).
+        """
         if profile:
             return cls._profiles.get(profile)
         return cls._profiles
@@ -446,21 +589,79 @@ class LLM:
     """
     A unified entry point for all supported LLM backends.
 
-    Usage:
-      # pick by env var (default: LiteLLM)
-      llm = LLM()
-      # or override explicitly
-      llm = LLM(backend="AutoGen", config_list=my_configs)
-      # or use predefined profiles
-      llm = LLM(profile="premium")  # Use premium model
-      llm = LLM(profile="cheap")    # Use cheaper model
-      llm = LLM(profile="reasoning")    # Use reasoning/thinking model
+    The LLM class provides a simple interface for creating language model instances.
+    By default, it uses gpt-4o-mini through LiteLLM.
+
+    Basic Usage:
+        # Use default model (gpt-4o-mini)
+        llm = LLM()
+        
+        # Specify a model directly
+        llm = LLM(model="gpt-4o")
+        llm = LLM(model="claude-3-5-sonnet-latest")
+        llm = LLM(model="o1-preview")
+        
+        # Add LiteLLM parameters
+        llm = LLM(model="gpt-4o", temperature=0.7, max_tokens=2000)
+        llm = LLM(model="gpt-4o-mini", temperature=0.3, top_p=0.9)
+
+    Using Named Profiles:
+        # Use a saved profile
+        llm = LLM(profile="my_custom_profile")
+        
+        # Create profiles with LLMFactory
+        LLMFactory.create_profile("creative", model="gpt-4o", temperature=0.9)
+        llm = LLM(profile="creative")
+
+    Using Different Backends:
+        # Explicitly specify backend (default: LiteLLM)
+        llm = LLM(backend="AutoGen", config_list=my_configs)
+        llm = LLM(backend="CustomLLM", model="llama-3.1-8b")
+        
+        # Or set via environment variable
+        # export TRACE_DEFAULT_LLM_BACKEND=AutoGen
+        llm = LLM()
+
+    Examples with LiteLLM Parameters:
+        # Structured output
+        llm = LLM(
+            model="gpt-4o-mini",
+            response_format={"type": "json_object"},
+            temperature=0.3
+        )
+        
+        # High creativity
+        llm = LLM(
+            model="gpt-4o",
+            temperature=0.9,
+            top_p=0.95,
+            presence_penalty=0.6
+        )
+        
+        # Deterministic responses
+        llm = LLM(
+            model="gpt-4o-mini",
+            temperature=0,
+            seed=42
+        )
+
+    See Also:
+        - LLMFactory: For managing named profiles
+        - https://docs.litellm.ai/docs/completion/input: Full list of LiteLLM parameters
     """
-    def __new__(cls, *args, profile: str = None, backend: str = None, **kwargs):
-        # New: if profile is specified, use LLMFactory
+    def __new__(cls, model: str = None, profile: str = None, backend: str = None, **kwargs):
+        # Priority 1: If profile is specified, use LLMFactory
         if profile:
-            return LLMFactory.get_llm(profile)
-        # Decide which backend to use
+            return LLMFactory.get_llm(profile=profile, **kwargs)
+        
+        # Priority 2: If model is specified, use LLMFactory with model
+        if model:
+            if backend is not None:
+                kwargs['backend'] = backend
+            return LLMFactory.get_llm(model=model, **kwargs)
+        
+        # Priority 3: Use backend-specific instantiation (for AutoGen, CustomLLM, etc.)
+        # This path is for when neither profile nor model is specified
         name = backend or os.getenv("TRACE_DEFAULT_LLM_BACKEND", "LiteLLM")
         try:
             backend_cls = _LLM_REGISTRY[name]
@@ -468,4 +669,4 @@ class LLM:
             raise ValueError(f"Unknown LLM backend: {name}. "
                              f"Valid options are: {list(_LLM_REGISTRY)}")
         # Instantiate and return the chosen subclass
-        return backend_cls(*args, **kwargs)
+        return backend_cls(**kwargs)
