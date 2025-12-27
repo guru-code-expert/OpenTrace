@@ -458,15 +458,28 @@ class GoogleGenAILLM(AbstractModel):
     This class supports storing default generation parameters (like temperature,
     max_output_tokens, etc.) that will be used for all calls unless overridden.
     
-    Note system_instruction is supported.
+    Note: Use ConversationHistory.to_gemini_format() to convert conversation history
+    to the format expected by Google GenAI.
+    
     Example:
-    llm = LLM(backend="GoogleGenAI", model="gemini-2.5-flash", mm_beta=True)
-    response = llm(
-        messages=[
-            {"role": "user", "content": "Hello!"}
-        ],
-        system_instruction="You are a helpful assistant."
-    )
+        from opto.utils.llm import LLM
+        from opto.utils.backbone import ConversationHistory, UserTurn, AssistantTurn
+        
+        # Initialize LLM
+        llm = LLM(model="gemini-2.5-flash")
+        
+        # Create conversation history
+        history = ConversationHistory()
+        history.system_prompt = "You are a helpful assistant."
+        history.add_user_turn(UserTurn().add_text("What is AI?"))
+        
+        # Convert to Gemini format and call LLM
+        messages = history.to_gemini_format()
+        response = llm(messages=messages, max_tokens=100)
+        
+        # Parse response
+        at = AssistantTurn(response)
+        print(at.get_text())
     """
 
     def __init__(self, model: Union[str, None] = None, reset_freq: Union[int, None] = None,
@@ -505,64 +518,22 @@ class GoogleGenAILLM(AbstractModel):
             # Extract system_instruction if present (needs to be at config level, not in kwargs)
             system_instruction = kwargs.pop('system_instruction', None)
             
-            # Handle messages parameter for automatic system instruction extraction
+            # Handle messages parameter (from history.to_gemini_format())
             messages = kwargs.pop('messages', None)
+            contents = kwargs.pop('contents', None)
+            
             if messages:
-                # If system_instruction is explicitly passed, drop any system messages
-                if system_instruction is not None:
-                    # Filter out system messages
-                    filtered_messages = [msg for msg in messages if msg.get('role') != 'system']
-                else:
-                    # If system_instruction not passed, check if first message is system
-                    if messages and messages[0].get('role') == 'system':
+                # Extract system message if present and not explicitly overridden
+                if messages and messages[0].get('role') == 'system':
+                    if system_instruction is None:
                         system_instruction = messages[0].get('content')
-                        # Remove the system message from messages
-                        filtered_messages = messages[1:]
-                    else:
-                        filtered_messages = messages
-                
-                # Convert messages to Google GenAI contents format
-                # Google GenAI expects contents as a list of content items
-                contents = []
-                for msg in filtered_messages:
-                    role = msg.get('role')
-                    content = msg.get('content')
-                    
-                    # Map roles: user -> user, assistant -> model
-                    if role == 'assistant':
-                        role = 'model'
-                    
-                    # Handle content (can be string or list of content blocks)
-                    if isinstance(content, str):
-                        contents.append({'role': role, 'parts': [{'text': content}]})
-                    elif isinstance(content, list):
-                        # Convert content blocks to parts
-                        parts = []
-                        for block in content:
-                            if block.get('type') == 'text':
-                                parts.append({'text': block.get('text', '')})
-                            elif block.get('type') == 'image_url':
-                                # Handle image URLs
-                                image_url = block.get('image_url', {}).get('url', '')
-                                if image_url.startswith('data:'):
-                                    # Extract base64 data
-                                    import re
-                                    match = re.match(r'data:([^;]+);base64,(.+)', image_url)
-                                    if match:
-                                        mime_type, data = match.groups()
-                                        parts.append({'inline_data': {'mime_type': mime_type, 'data': data}})
-                                else:
-                                    # External URL
-                                    parts.append({'file_data': {'file_uri': image_url}})
-                        if parts:
-                            contents.append({'role': role, 'parts': parts})
-                
-                # Use converted contents instead of args
-                # Don't wrap in tuple since we're passing as keyword argument
-                contents_to_use = contents if contents else args[0] if args else None
-            else:
-                # No messages parameter, use args as-is
-                contents_to_use = args[0] if args else None
+                    # Remove system message from contents
+                    contents = messages[1:]
+                else:
+                    contents = messages
+            
+            # Use contents if provided, otherwise use positional args
+            contents_to_use = contents if contents is not None else (args[0] if args else None)
             
             # Map max_tokens to max_output_tokens for Google GenAI
             if 'max_tokens' in kwargs:

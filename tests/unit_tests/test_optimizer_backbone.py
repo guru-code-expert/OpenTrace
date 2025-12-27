@@ -576,7 +576,7 @@ def test_real_google_genai_multi_turn_with_images_updated():
     user_turn1 = UserTurn().add_text("Generate an image of a serene mountain landscape at sunrise with a lake in the foreground.")
     
     history.add_user_turn(user_turn1)
-    messages = history.to_litellm_format()
+    messages = history.to_gemini_format()
     
     print("\n📷 Turn 1 - User:")
     print("  Generate an image of a serene mountain landscape at sunrise with a lake in the foreground.")
@@ -593,7 +593,7 @@ def test_real_google_genai_multi_turn_with_images_updated():
     user_turn2 = UserTurn().add_text("Can you describe the colors and mood of the image you just generated?")
     history.add_user_turn(user_turn2)
     
-    messages = history.to_litellm_format()
+    messages = history.to_gemini_format()
     
     print("\n📷 Turn 2 - User:")
     print("  Can you describe the colors and mood of the image you just generated?")

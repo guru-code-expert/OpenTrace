@@ -1948,7 +1948,19 @@ class ConversationHistory:
         protected_rounds: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
-        Alias for to_litellm_format() for convenience
+        Smart message format conversion that auto-detects the appropriate format.
+        
+        This method automatically chooses between Gemini format and LiteLLM format based on
+        the model name found in the most recent AssistantTurn. If a Gemini model is detected,
+        it uses to_gemini_format(), otherwise it uses to_litellm_format().
+        
+        Model detection:
+        - If any AssistantTurn has a model name containing "gemini" (case-insensitive),
+          uses Gemini format
+        - Otherwise, uses LiteLLM format (default)
+        
+        Note: This detection may not work for custom LLM backends with Gemini model names.
+        In such cases, call to_gemini_format() or to_litellm_format() explicitly.
         
         Args:
             n: Number of historical rounds (user+assistant pairs) to include.
@@ -1961,9 +1973,144 @@ class ConversationHistory:
                 If None, uses self.protected_rounds. Counts towards n.
         
         Returns:
-            List of message dictionaries in LiteLLM format
+            List of message dictionaries in the appropriate format
+        
+        Example:
+            # Automatically uses Gemini format if model is Gemini
+            history = ConversationHistory()
+            history.system_prompt = "You are helpful."
+            history.add_user_turn(UserTurn().add_text("Hello"))
+            
+            # If you used a Gemini model, this will auto-detect and use Gemini format
+            messages = history.to_messages()
+            
+            # Or be explicit:
+            messages = history.to_gemini_format()  # Force Gemini format
+            messages = history.to_litellm_format()  # Force LiteLLM format
         """
-        return self.to_litellm_format(n=n, truncate_strategy=truncate_strategy, protected_rounds=protected_rounds)
+        # Check if any AssistantTurn has a Gemini model
+        use_gemini_format = False
+        for turn in self.turns:
+            if isinstance(turn, AssistantTurn) and turn.model:
+                if 'gemini' in turn.model.lower():
+                    use_gemini_format = True
+                    break
+        
+        # Use the appropriate format
+        if use_gemini_format:
+            return self.to_gemini_format(
+                n=n,
+                truncate_strategy=truncate_strategy,
+                protected_rounds=protected_rounds
+            )
+        else:
+            return self.to_litellm_format(
+                n=n,
+                truncate_strategy=truncate_strategy,
+                protected_rounds=protected_rounds
+            )
+    
+    def to_gemini_format(
+        self,
+        n: int = -1,
+        truncate_strategy: Literal["from_start", "from_end"] = "from_start",
+        protected_rounds: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Convert to Google Gemini format (messages with 'model' role instead of 'assistant')
+        
+        This method converts the conversation history to a format compatible with Google's
+        Gemini API. The main differences from LiteLLM format are:
+        - Uses 'model' instead of 'assistant' for role names
+        - Content is structured as 'parts' (list of text/image parts)
+        - System message (if present) remains as first message with role='system'
+        
+        The GoogleGenAILLM class will extract the system message and convert it to
+        system_instruction when making the API call.
+        
+        Args:
+            n: Number of historical rounds (user+assistant pairs) to include.
+               -1 means all history (default: -1).
+               The current (potentially incomplete) round is always included.
+            truncate_strategy: How to truncate when n is specified:
+                - "from_start": Remove oldest rounds, keep the most recent n rounds (default)
+                - "from_end": Remove newest rounds, keep the oldest n rounds
+            protected_rounds: Number of initial rounds to never truncate (task definition).
+                If None, uses self.protected_rounds. These rounds count towards n.
+        
+        Returns:
+            List of message dictionaries in Gemini format with 'role' and 'parts'.
+            System message (if present) is included as first message with role='system'.
+        
+        Example:
+            from opto.utils.llm import LLM
+            from opto.utils.backbone import ConversationHistory, UserTurn
+            
+            # Create conversation
+            history = ConversationHistory()
+            history.system_prompt = "You are a helpful assistant."
+            history.add_user_turn(UserTurn().add_text("Hello!"))
+            
+            # Convert to Gemini format
+            messages = history.to_gemini_format()
+            
+            # Use with GoogleGenAILLM
+            llm = LLM(model="gemini-2.5-flash")
+            response = llm(messages=messages)
+        """
+        # Get the LiteLLM format messages first (handles truncation logic)
+        litellm_messages = self.to_litellm_format(
+            n=n,
+            truncate_strategy=truncate_strategy,
+            protected_rounds=protected_rounds
+        )
+        
+        # Convert messages to Google GenAI format
+        gemini_messages = []
+        
+        for msg in litellm_messages:
+            role = msg.get('role')
+            content = msg.get('content')
+            
+            # Keep system messages as-is (will be extracted by GoogleGenAILLM)
+            if role == 'system':
+                gemini_messages.append({'role': 'system', 'content': content})
+                continue
+            
+            # Map roles: user -> user, assistant -> model
+            if role == 'assistant':
+                role = 'model'
+            elif role == 'tool':
+                # Skip tool messages for now - Gemini handles these differently
+                # TODO: Handle tool results properly if needed
+                continue
+            
+            # Handle content (can be string or list of content blocks)
+            if isinstance(content, str):
+                gemini_messages.append({'role': role, 'parts': [{'text': content}]})
+            elif isinstance(content, list):
+                # Convert content blocks to parts
+                parts = []
+                for block in content:
+                    if block.get('type') == 'text':
+                        parts.append({'text': block.get('text', '')})
+                    elif block.get('type') == 'image_url':
+                        # Handle image URLs
+                        image_url = block.get('image_url', {}).get('url', '')
+                        if image_url.startswith('data:'):
+                            # Extract base64 data
+                            import re
+                            match = re.match(r'data:([^;]+);base64,(.+)', image_url)
+                            if match:
+                                mime_type, data = match.groups()
+                                parts.append({'inline_data': {'mime_type': mime_type, 'data': data}})
+                        else:
+                            # External URL
+                            parts.append({'file_data': {'file_uri': image_url}})
+                if parts:
+                    gemini_messages.append({'role': role, 'parts': parts})
+        
+        return gemini_messages
 
     def save_to_file(self, filepath: str):
         """Save conversation history to JSON file"""
