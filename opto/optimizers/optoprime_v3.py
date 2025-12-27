@@ -5,25 +5,24 @@ Key difference to v2:
 """
 
 import json
-from typing import Any, List, Dict, Union, Tuple, Optional
-from dataclasses import dataclass, field, asdict
+from typing import List, Union, Tuple, Optional
+from dataclasses import dataclass
 from opto.optimizers.optoprime import OptoPrime, node_to_function_feedback
 from opto.trace.utils import dedent
 from opto.optimizers.utils import truncate_expression, extract_xml_like_data
-from opto.trace.nodes import ParameterNode, Node, MessageNode, is_image
-from opto.trace.propagators import TraceGraph, GraphPropagator
+from opto.trace.nodes import ParameterNode, is_image
+from opto.trace.propagators import GraphPropagator
 from opto.trace.propagators.propagators import Propagator
 
 from opto.utils.llm import AbstractModel, LLM
 from opto.optimizers.buffers import FIFOBuffer
-from opto.optimizers.backbone import (
+from opto.utils.backbone import (
     ConversationHistory, UserTurn, AssistantTurn, PromptTemplate,
-    ContentBlock, TextContent, ImageContent, ContentBlockList,
+    TextContent, ImageContent, ContentBlockList,
     DEFAULT_IMAGE_PLACEHOLDER
 )
 import copy
 import pickle
-import re
 from typing import Dict, Any
 
 

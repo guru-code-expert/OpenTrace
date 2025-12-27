@@ -1,20 +1,14 @@
 import os
 import pytest
-from opto.trace import bundle, node, GRAPH
-import opto.optimizers
-import importlib
-import inspect
-import json
-import pickle
+from opto.trace import GRAPH
 from opto.utils.llm import LLM
 
-from opto import trace
 from opto.trace import node, bundle
 from opto.optimizers.optoprime_v3 import (
     OptoPrimeV3, OptimizerPromptSymbolSet2, ProblemInstance,
     OptimizerPromptSymbolSet, value_to_image_content
 )
-from opto.optimizers.backbone import TextContent, ImageContent, ContentBlock, ContentBlockList
+from opto.utils.backbone import TextContent, ImageContent
 
 # You can override for temporarly testing a specific optimizer ALL_OPTIMIZERS = [TextGrad] # [OptoPrimeMulti] ALL_OPTIMIZERS = [OptoPrime]
 
@@ -187,7 +181,7 @@ The instruction suggests that the output, `add0`, needs to be made bigger than i
 
 def test_problem_instance_text_only():
     """Test that ProblemInstance with text-only content works correctly."""
-    from opto.optimizers.backbone import ContentBlockList
+    from opto.utils.backbone import ContentBlockList
     symbol_set = OptimizerPromptSymbolSet()
     
     instance = ProblemInstance(
@@ -222,7 +216,7 @@ def test_problem_instance_text_only():
 
 def test_problem_instance_with_content_blocks():
     """Test ProblemInstance with ContentBlockList fields containing images."""
-    from opto.optimizers.backbone import ContentBlockList
+    from opto.utils.backbone import ContentBlockList
     symbol_set = OptimizerPromptSymbolSet()
     
     # Create content blocks with an image
@@ -265,7 +259,7 @@ def test_problem_instance_with_content_blocks():
 
 def test_problem_instance_mixed_content():
     """Test ProblemInstance with mixed text and image content in multiple fields."""
-    from opto.optimizers.backbone import ContentBlockList
+    from opto.utils.backbone import ContentBlockList
     symbol_set = OptimizerPromptSymbolSet()
     
     # Variables with image
@@ -493,7 +487,7 @@ def test_optimizer_step_with_content_blocks():
     system_prompt, user_prompt = optimizer.construct_prompt(summary)
     
     # Verify content blocks structure
-    from opto.optimizers.backbone import ContentBlockList
+    from opto.utils.backbone import ContentBlockList
     assert isinstance(user_prompt, ContentBlockList)
     assert len(user_prompt) > 0
     

@@ -1,11 +1,13 @@
 """
 This adapater is for three cases:
-1. OpenAI's response API (which is new and not fully supported by LiteLLM yet)
-2. Google's MultiPart API design (not supported by LiteLLM response API at all)
-3. Generic fallback option for all other providers (through LiteLLM)
+When MM (multimodal) is enabled, we primarily either use:
+1. LiteLLM's response API
+2. Google's Interaction API design (not supported by LiteLLM response API at all)
+When MM is disabled, for backward compatibility, we use:
+1. LiteLLM's completion API
 """
 
-from typing import List, Tuple, Dict, Any, Callable, Union
+from typing import List, Tuple, Dict, Any, Callable, Union, Optional
 import os
 import time
 import json
@@ -16,6 +18,9 @@ from .auto_retry import retry_with_exponential_backoff
 import openai
 from google import genai
 from google.genai import types
+
+# Import AssistantTurn and related types for mm_beta mode
+from .backbone import AssistantTurn, TextContent, ImageContent, ToolCall, ToolResult
 
 try:
     import autogen  # We import autogen here to avoid the need of installing autogen
@@ -35,6 +40,9 @@ class AbstractModel:
     reset_freq : int or None, optional
         Number of seconds after which to refresh the model. If None, the model
         is never refreshed.
+    mm_beta : bool, optional
+        If True, returns AssistantTurn objects with rich multimodal content.
+        If False (default), returns raw API responses in legacy format.
 
     Attributes
     ----------
@@ -42,13 +50,17 @@ class AbstractModel:
         The factory function for creating model instances.
     reset_freq : int or None
         Refresh frequency in seconds.
+    mm_beta : bool
+        Whether to use multimodal beta mode.
+
     model : Any
         Property that returns the current model instance.
 
     Methods
     -------
     __call__(*args, **kwargs)
-        Execute the model, refreshing if needed.
+        Execute the model, refreshing if needed. Returns AssistantTurn if mm_beta=True,
+        otherwise returns raw API response.
 
     Notes
     -----
@@ -56,8 +68,9 @@ class AbstractModel:
     1. **Automatic Refreshing**: Recreates the model instance periodically
        to prevent issues with long-running connections.
     2. **Serialization**: Supports pickling by recreating the model on load.
-    3. **Consistent Interface**: Ensures responses are available at
-       `response['choices'][0]['message']['content']`.
+    3. **Response Formats**: 
+       - Legacy (mm_beta=False): `response['choices'][0]['message']['content']`
+       - Multimodal (mm_beta=True): AssistantTurn object with .content, .tool_calls, etc.
 
     Subclasses should override the `model` property to customize behavior.
 
@@ -67,17 +80,21 @@ class AbstractModel:
     LiteLLM : Concrete implementation using LiteLLM
     """
 
-    def __init__(self, factory: Callable, reset_freq: Union[int, None] = None) -> None:
+    def __init__(self, factory: Callable, reset_freq: Union[int, None] = None, 
+                 mm_beta: bool = False) -> None:
         """
         Args:
             factory: A function that takes no arguments and returns a model that is callable.
             reset_freq: The number of seconds after which the model should be
                 refreshed. If None, the model is never refreshed.
+            mm_beta: If True, returns AssistantTurn objects with rich multimodal content.
+                If False (default), returns raw API responses in legacy format.
         """
         self.factory = factory
         self._model = self.factory()
         self.reset_freq = reset_freq
         self._init_time = time.time()
+        self.mm_beta = mm_beta
 
     # Overwrite this `model` property when subclassing.
     @property
@@ -88,11 +105,22 @@ class AbstractModel:
     # This is the main API
     def __call__(self, *args, **kwargs) -> Any:
         """ The call function handles refreshing the model if needed.
+        
+        Returns:
+            If mm_beta=False: Raw completion API response (backward compatible)
+            If mm_beta=True: AssistantTurn object with parsed multimodal content
         """
         if self.reset_freq is not None and time.time() - self._init_time > self.reset_freq:
             self._model = self.factory()
             self._init_time = time.time()
-        return self.model(*args, **kwargs)
+        
+        response = self.model(*args, **kwargs)
+        
+        # Parse to AssistantTurn if mm_beta mode is enabled
+        if self.mm_beta:
+            return AssistantTurn(response)
+        
+        return response
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -162,7 +190,8 @@ class AutoGenLLM(AbstractModel):
     >>> response = llm(messages=[{"role": "user", "content": "Hello"}])
     """
 
-    def __init__(self, config_list: List = None, filter_dict: Dict = None, reset_freq: Union[int, None] = None) -> None:
+    def __init__(self, config_list: List = None, filter_dict: Dict = None, 
+                 reset_freq: Union[int, None] = None, mm_beta: bool = False) -> None:
         if config_list is None:
             try:
                 config_list = autogen.config_list_from_json("OAI_CONFIG_LIST")
@@ -175,7 +204,7 @@ class AutoGenLLM(AbstractModel):
             config_list = autogen.filter_config(config_list, filter_dict)
 
         factory = lambda *args, **kwargs: self._factory(config_list)
-        super().__init__(factory, reset_freq)
+        super().__init__(factory, reset_freq, mm_beta=mm_beta)
 
     @classmethod
     def _factory(cls, config_list):
@@ -254,6 +283,7 @@ class LiteLLM(AbstractModel):
     This is an LLM backend supported by LiteLLM library.
 
     https://docs.litellm.ai/docs/completion/input
+    https://docs.litellm.ai/docs/response_api
 
     To use this, set the credentials through the environment variable as
     instructed in the LiteLLM documentation. For convenience, you can set the
@@ -263,10 +293,17 @@ class LiteLLM(AbstractModel):
     
     This class now supports storing default completion parameters (like temperature,
     top_p, max_tokens, etc.) that will be used for all calls unless overridden.
+    
+    Responses API Support:
+        When mm_beta=True, the Responses API is used for rich multimodal content.
+        When mm_beta=False (default), the Completion API is used for backward compatibility.
+        
+        See: https://docs.litellm.ai/docs/response_api
     """
 
     def __init__(self, model: Union[str, None] = None, reset_freq: Union[int, None] = None,
-                 cache=True, max_retries=10, base_delay=1.0, **default_params) -> None:
+                 cache=True, max_retries=10, base_delay=1.0,
+                 mm_beta: bool = False, **default_params) -> None:
         if model is None:
             model = os.environ.get('TRACE_LITELLM_MODEL')
             if model is None:
@@ -276,38 +313,92 @@ class LiteLLM(AbstractModel):
         self.model_name = model
         self.cache = cache
         self.default_params = default_params  # Store default completion parameters
-        factory = lambda: self._factory(self.model_name, self.default_params, max_retries=max_retries, base_delay=base_delay)
-        super().__init__(factory, reset_freq)
+        
+        factory = lambda: self._factory(
+            self.model_name, 
+            self.default_params, 
+            mm_beta,
+            max_retries=max_retries, 
+            base_delay=base_delay
+        )
+        super().__init__(factory, reset_freq, mm_beta=mm_beta)
 
     @classmethod
-    def _factory(cls, model_name: str, default_params: dict, max_retries=10, base_delay=1.0):
+    def _factory(cls, model_name: str, default_params: dict, mm_beta: bool,
+                 max_retries=10, base_delay=1.0):
         import litellm
+        
+        # Use Responses API when mm_beta=True, otherwise use Completion API
+        api_func = litellm.responses if mm_beta else litellm.completion
+        operation_name = "LiteLLM_responses" if mm_beta else "LiteLLM_completion"
+        
         if model_name.startswith('azure/'):  # azure model
             azure_token_provider_scope = os.environ.get('AZURE_TOKEN_PROVIDER_SCOPE', None)
             if azure_token_provider_scope is not None:
                 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
                 credential = get_bearer_token_provider(DefaultAzureCredential(), azure_token_provider_scope)
-                return lambda *args, **kwargs: retry_with_exponential_backoff(
-                    lambda: litellm.completion(model_name, *args,
-                                             azure_ad_token_provider=credential, **{**default_params, **kwargs}),
+                if mm_beta:
+                    # Responses API: model as keyword argument, convert messages to input
+                    def azure_responses_wrapper(*args, **kwargs):
+                        # Convert 'messages' to 'input' for Responses API
+                        if 'messages' in kwargs and 'input' not in kwargs:
+                            kwargs['input'] = kwargs.pop('messages')
+                        return retry_with_exponential_backoff(
+                            lambda: api_func(model=model_name,
+                                           azure_ad_token_provider=credential, **{**default_params, **kwargs}),
+                            max_retries=max_retries,
+                            base_delay=base_delay,
+                            operation_name=operation_name
+                        )
+                    return azure_responses_wrapper
+                else:
+                    # Completion API: model as positional argument
+                    return lambda *args, **kwargs: retry_with_exponential_backoff(
+                        lambda: api_func(model_name, *args,
+                                       azure_ad_token_provider=credential, **{**default_params, **kwargs}),
+                        max_retries=max_retries,
+                        base_delay=base_delay,
+                        operation_name=operation_name
+                    )
+        
+        if mm_beta:
+            # Responses API: model as keyword argument, convert messages to input
+            def responses_wrapper(*args, **kwargs):
+                # Convert 'messages' to 'input' for Responses API
+                if 'messages' in kwargs and 'input' not in kwargs:
+                    kwargs['input'] = kwargs.pop('messages')
+                return retry_with_exponential_backoff(
+                    lambda: api_func(model=model_name, **{**default_params, **kwargs}),
                     max_retries=max_retries,
                     base_delay=base_delay,
-                    operation_name="LiteLLM_completion"
+                    operation_name=operation_name
                 )
-        return lambda *args, **kwargs: retry_with_exponential_backoff(
-            lambda: litellm.completion(model_name, *args, **{**default_params, **kwargs}),
-            max_retries=max_retries,
-            base_delay=base_delay,
-            operation_name="LiteLLM_completion"
-        )
+            return responses_wrapper
+        else:
+            # Completion API: model as positional argument
+            return lambda *args, **kwargs: retry_with_exponential_backoff(
+                lambda: api_func(model_name, *args, **{**default_params, **kwargs}),
+                max_retries=max_retries,
+                base_delay=base_delay,
+                operation_name=operation_name
+            )
 
     @property
     def model(self):
         """
-        response = litellm.completion(
-            model=self.model,
-            messages=[{"content": message, "role": "user"}]
-        )
+        Calls either litellm.completion() or litellm.responses() depending on mm_beta.
+        
+        For completion API (mm_beta=False):
+            response = litellm.completion(
+                model=self.model,
+                messages=[{"content": message, "role": "user"}]
+            )
+        
+        For responses API (mm_beta=True):
+            response = litellm.responses(
+                model=self.model,
+                input="Your input text"
+            )
         """
         return lambda *args, **kwargs: self._model(*args, **kwargs)
 
@@ -319,7 +410,7 @@ class CustomLLM(AbstractModel):
     """
 
     def __init__(self, model: Union[str, None] = None, reset_freq: Union[int, None] = None,
-                 cache=True) -> None:
+                 cache=True, mm_beta: bool = False) -> None:
         if model is None:
             model = os.environ.get('TRACE_CUSTOMLLM_MODEL', 'gpt-4o')
         base_url = os.environ.get('TRACE_CUSTOMLLM_URL', 'http://xx.xx.xxx.xx:4000/')
@@ -330,7 +421,7 @@ class CustomLLM(AbstractModel):
         self.model_name = model
         self.cache = cache
         factory = lambda: self._factory(base_url, server_api_key)  # an LLM instance uses a fixed model
-        super().__init__(factory, reset_freq)
+        super().__init__(factory, reset_freq, mm_beta=mm_beta)
 
     @classmethod
     def _factory(cls, base_url: str, server_api_key: str):
@@ -347,11 +438,123 @@ class CustomLLM(AbstractModel):
             config['model'] = self.model_name
         return self._model.chat.completions.create(**config)
 
+class GoogleGenAILLM(AbstractModel):
+    """
+    This is an LLM backend using Google's GenAI SDK with the Interactions API.
+    
+    https://ai.google.dev/gemini-api/docs/text-generation
+    
+    The Interactions API is a unified interface for interacting with Gemini models,
+    similar to OpenAI's Response API. It provides better state management, tool
+    orchestration, and support for long-running tasks.
+    
+    To use this, set the GEMINI_API_KEY environment variable with your API key.
+    For convenience, you can set the default model name through the environment 
+    variable TRACE_GOOGLE_GENAI_MODEL.
+    
+    Supported models:
+    - Gemini 3: gemini-3-flash-preview, gemini-3-pro-preview
+    - Gemini 2.5: gemini-2.5-flash, gemini-2.5-pro, gemini-2.5-flash-lite
+    
+    This class supports storing default generation parameters (like temperature,
+    max_output_tokens, etc.) that will be used for all calls unless overridden.
+    
+    Note system_instruction is supported.
+    Example:
+    llm = LLM(backend="GoogleGenAI", model="gemini-2.5-flash", mm_beta=True)
+    response = llm(
+        messages=[
+            {"role": "user", "content": "Hello!"}
+        ],
+        system_instruction="You are a helpful assistant."
+    )
+    """
+
+    def __init__(self, model: Union[str, None] = None, reset_freq: Union[int, None] = None,
+                 cache=True, mm_beta: bool = False, **default_params) -> None:
+        if model is None:
+            model = os.environ.get('TRACE_GOOGLE_GENAI_MODEL', 'gemini-2.5-flash')
+        
+        self.model_name = model
+        self.cache = cache
+        self.default_params = default_params  # Store default generation parameters
+        factory = lambda: self._factory(self.model_name, self.default_params)
+        super().__init__(factory, reset_freq, mm_beta=mm_beta)
+
+    @classmethod
+    def _factory(cls, model_name: str, default_params: dict):
+        """Create a Google GenAI client wrapper using the Interactions API."""
+        # Get API key from environment variable
+        api_key = os.environ.get('GEMINI_API_KEY')
+        if api_key:
+            client = genai.Client(api_key=api_key)
+        else:
+            # Try without API key (will use default credentials or fail gracefully)
+            client = genai.Client()
+
+        # Build config if there are generation parameters
+        config_params = {}
+        
+        # Handle thinking config for Gemini 2.5+ models
+        if 'thinking_budget' in default_params:
+            thinking_budget = default_params.pop('thinking_budget')
+            config_params['thinking_config'] = types.ThinkingConfig(
+                thinking_budget=thinking_budget
+            )
+
+        def api_func(model_name, *args, **kwargs):
+            # Extract system_instruction if present (needs to be at config level, not in kwargs)
+            system_instruction = kwargs.pop('system_instruction', None)
+            
+            # Handle messages parameter for automatic system instruction extraction
+            messages = kwargs.get('messages', None)
+            if messages:
+                # If system_instruction is explicitly passed, drop any system messages
+                if system_instruction is not None:
+                    # Filter out system messages
+                    filtered_messages = [msg for msg in messages if msg.get('role') != 'system']
+                    kwargs['messages'] = filtered_messages
+                else:
+                    # If system_instruction not passed, check if first message is system
+                    if messages and messages[0].get('role') == 'system':
+                        system_instruction = messages[0].get('content')
+                        # Remove the system message from messages
+                        kwargs['messages'] = messages[1:]
+            
+            if system_instruction:
+                config_params_with_system = {**config_params, 'system_instruction': system_instruction}
+            else:
+                config_params_with_system = config_params
+            
+            return client.models.generate_content(
+                model=model_name,
+                contents=args,
+                config=types.GenerateContentConfig(**{**config_params_with_system, **kwargs})
+            )
+
+        return lambda *args, **kwargs: retry_with_exponential_backoff(
+            lambda: api_func(model_name, *args, **{**default_params, **kwargs}),
+            max_retries=5,
+            base_delay=1,
+            operation_name=f"{model_name}"
+        )
+
+    @property
+    def model(self):
+        """
+        Wrapper that injects the model name into calls.
+        
+        Example:
+            response = llm(contents="How does AI work?")
+        """
+        return lambda *args, **kwargs: self._model(model=self.model_name, *args, **kwargs)
+
 # Registry of available backends
 _LLM_REGISTRY = {
     "LiteLLM": LiteLLM,
     "AutoGen": AutoGenLLM,
     "CustomLLM": CustomLLM,
+    "GoogleGenAI": GoogleGenAILLM,
 }
 
 class LLMFactory:
@@ -442,16 +645,17 @@ class LLMFactory:
 
     # Default profile - just gpt-4o-mini with no opinionated settings
     _profiles = {
-        'default': {'backend': 'LiteLLM', 'params': {'model': 'gpt-4o-mini'}},
+        'default': {'backend': 'LiteLLM', 'params': {'model': 'gpt-4o'}},
     }
-
     @classmethod
-    def get_llm(cls, profile: str = 'default', model: str = None, **kwargs) -> AbstractModel:
+    def get_llm(cls, profile: str = 'default', model: str = None, mm_beta: bool = False, **kwargs) -> AbstractModel:
         """Get an LLM instance for the specified profile or model.
         
         Args:
             profile: Name of the profile to use. Defaults to 'default'.
             model: Model name to use directly. If provided, overrides profile.
+            mm_beta: If True, returns AssistantTurn objects with rich multimodal content.
+                If False (default), returns raw API responses in legacy format.
             **kwargs: Additional parameters to pass to the backend (e.g., temperature, top_p).
                      These override profile settings if both are specified.
         
@@ -473,16 +677,30 @@ class LLMFactory:
             
             # Override profile settings
             llm = LLMFactory.get_llm(profile="creative_writer", temperature=0.5)
+            
+            # Use mm_beta mode for multimodal responses
+            llm = LLMFactory.get_llm(model="gpt-4o", mm_beta=True)
         """
         # If model is specified directly, create a simple config
         if model is not None:
             backend = kwargs.pop('backend', None)
-            if backend is None:
-                backend = 'LiteLLM'
-            backend_cls = _LLM_REGISTRY[backend]
-            params = {'model': model, **kwargs}
+            
+            # Determine backend with priority: Gemini models > explicit backend > default
+            if model.startswith('gemini'):
+                # Gemini models use GoogleGenAILLM backend (highest priority)
+                backend_cls = _LLM_REGISTRY['GoogleGenAILLM']
+                # Strip 'gemini/' prefix if present (LiteLLM format: gemini/gemini-pro)
+                if model.startswith('gemini/'):
+                    model = model[len('gemini/'):]
+            elif backend is not None:
+                # Explicit backend specified
+                backend_cls = _LLM_REGISTRY[backend]
+            else:
+                # Default to LiteLLM for other models
+                backend_cls = _LLM_REGISTRY['LiteLLM']
+            
+            params = {'model': model, 'mm_beta': mm_beta, **kwargs}
             return backend_cls(**params)
-        
         # Otherwise use profile
         if profile not in cls._profiles:
             raise ValueError(
@@ -495,6 +713,7 @@ class LLMFactory:
         
         # Merge profile params with any override kwargs
         params = config['params'].copy()
+        params['mm_beta'] = mm_beta
         params.update(kwargs)
         
         return backend_cls(**params)
@@ -562,10 +781,11 @@ class DummyLLM(AbstractModel):
 
     def __init__(self,
                  callable,
-                 reset_freq: Union[int, None] = None) -> None:
+                 reset_freq: Union[int, None] = None,
+                 mm_beta: bool = False) -> None:
         # self.message = message
         self.callable = callable
-        super().__init__(self._factory, reset_freq)
+        super().__init__(self._factory, reset_freq, mm_beta=mm_beta)
 
     def _factory(self):
 
@@ -583,7 +803,6 @@ class DummyLLM(AbstractModel):
                 self.choices = [Choice(content)]
 
         return lambda *args, **kwargs:  Response(self.callable(*args, **kwargs))
-
 
 class LLM:
     """
@@ -605,6 +824,62 @@ class LLM:
         llm = LLM(model="gpt-4o", temperature=0.7, max_tokens=2000)
         llm = LLM(model="gpt-4o-mini", temperature=0.3, top_p=0.9)
 
+    Using Multimodal Beta Mode:
+        # Enable mm_beta for rich AssistantTurn responses
+        llm = LLM(model="gpt-4o", mm_beta=True)
+        response = llm(messages=[{"role": "user", "content": "Hello"}])
+        # response is now an AssistantTurn object with .content, .tool_calls, etc.
+        
+        # Legacy mode (default, mm_beta=False)
+        llm = LLM(model="gpt-4o")
+        response = llm(messages=[{"role": "user", "content": "Hello"}])
+        # response is raw API response: response.choices[0].message.content
+
+    Using System Messages:
+        
+        # LiteLLM (OpenAI, Anthropic, etc.) - Use messages array with role="system"
+        llm = LLM(model="gpt-4o-mini", mm_beta=True)
+        response = llm(messages=[
+            {"role": "system", "content": "You are a helpful math tutor."},
+            {"role": "user", "content": "What is 2+2?"}
+        ])
+        print(response.get_text())  # AssistantTurn object
+        
+        # LiteLLM Legacy mode (mm_beta=False)
+        llm = LLM(model="gpt-4o-mini")
+        response = llm(messages=[
+            {"role": "system", "content": "You are a pirate assistant."},
+            {"role": "user", "content": "Hello!"}
+        ])
+        print(response.choices[0].message.content)  # Raw API response
+        
+        # Google Gemini - Use system_instruction parameter (not in messages array)
+        llm = LLM(backend="GoogleGenAI", model="gemini-2.5-flash", mm_beta=True)
+        response = llm(
+            "Hello there",
+            system_instruction="You are a helpful assistant."
+        )
+        print(response.get_text())  # AssistantTurn object
+        
+        # Gemini with messages format (system_instruction separate from messages)
+        llm = LLM(backend="GoogleGenAI", model="gemini-2.5-flash", mm_beta=True)
+        response = llm(
+            messages=[
+                {"role": "user", "content": "What is your purpose?"}
+            ],
+            system_instruction="You are a creative writing instructor."
+        )
+        
+        # Our Gemini wrapper also automatically extracts system instruction from messages array if not passed explicitly
+        messages = [
+            {"role": "system", "content": "You are a Shakespearean poet."},
+            {"role": "user", "content": "Tell me about the sun."}
+        ]
+        response1 = llm(messages=messages)
+        messages.append({"role": "assistant", "content": response1.get_text()})
+        messages.append({"role": "user", "content": "And the moon?"})
+        response2 = llm(messages=messages)  # System message still applies
+
     Using Named Profiles:
         # Use a saved profile
         llm = LLM(profile="my_custom_profile")
@@ -617,6 +892,7 @@ class LLM:
         # Explicitly specify backend (default: LiteLLM)
         llm = LLM(backend="AutoGen", config_list=my_configs)
         llm = LLM(backend="CustomLLM", model="llama-3.1-8b")
+        llm = LLM(backend="GoogleGenAI", model="gemini-2.5-flash")
         
         # Or set via environment variable
         # export TRACE_DEFAULT_LLM_BACKEND=AutoGen
@@ -645,20 +921,35 @@ class LLM:
             seed=42
         )
 
+    Key Differences Between Backends:
+        LiteLLM (OpenAI, Anthropic, etc.):
+            - System message: Include in messages array with role="system"
+            - Format: messages=[{"role": "system", "content": "..."}]
+            - Works with: OpenAI, Anthropic, Cohere, etc.
+        
+        Google Gemini:
+            - System instruction: Pass as system_instruction parameter
+            - Format: system_instruction="You are a helpful assistant."
+            - Separate from messages array
+            - Works with: gemini-2.5-flash, gemini-2.5-pro, etc.
+
     See Also:
         - LLMFactory: For managing named profiles
+        - AssistantTurn: Returned when mm_beta=True
         - https://docs.litellm.ai/docs/completion/input: Full list of LiteLLM parameters
+        - https://ai.google.dev/gemini-api/docs/system-instructions: Gemini system instructions
     """
-    def __new__(cls, model: str = None, profile: str = None, backend: str = None, **kwargs):
+    def __new__(cls, model: str = None, profile: str = 'default', backend: str = None, 
+                mm_beta: bool = False, **kwargs):
         # Priority 1: If profile is specified, use LLMFactory
         if profile:
-            return LLMFactory.get_llm(profile=profile, **kwargs)
+            return LLMFactory.get_llm(profile=profile, mm_beta=mm_beta, **kwargs)
         
         # Priority 2: If model is specified, use LLMFactory with model
         if model:
             if backend is not None:
                 kwargs['backend'] = backend
-            return LLMFactory.get_llm(model=model, **kwargs)
+            return LLMFactory.get_llm(model=model, mm_beta=mm_beta, **kwargs)
         
         # Priority 3: Use backend-specific instantiation (for AutoGen, CustomLLM, etc.)
         # This path is for when neither profile nor model is specified
@@ -669,4 +960,5 @@ class LLM:
             raise ValueError(f"Unknown LLM backend: {name}. "
                              f"Valid options are: {list(_LLM_REGISTRY)}")
         # Instantiate and return the chosen subclass
+        kwargs['mm_beta'] = mm_beta
         return backend_cls(**kwargs)

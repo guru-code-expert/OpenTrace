@@ -5,15 +5,14 @@ Key difference to v2:
 3. Break from the OptoPrime style template, support more customizable template from user, for brevity and streamlined usage.
 """
 
-import json
 from textwrap import dedent
-from dataclasses import dataclass, asdict
-from typing import Dict, Optional, List, Union, Any
-from opto.trace.nodes import ParameterNode, is_image
+from dataclasses import dataclass
+from typing import Dict, Optional, List, Union
+from opto.trace.nodes import ParameterNode
 
 from opto.optimizers.optoprime_v3 import OptoPrimeV3, OptimizerPromptSymbolSet
-from opto.optimizers.backbone import (
-    ContentBlock, TextContent, ImageContent, ContentBlockList,
+from opto.utils.backbone import (
+    ContentBlock, ImageContent, ContentBlockList,
     DEFAULT_IMAGE_PLACEHOLDER
 )
 

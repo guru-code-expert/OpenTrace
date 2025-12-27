@@ -1,6 +1,24 @@
 """
 Flexible conversation manager for multi-turn LLM conversations.
 Uses LiteLLM unified format for all providers (OpenAI, Anthropic, Google, etc.).
+
+The class here follows this philosophy:
+1. Every class is a data class (pickable/jsonable)
+2. Most classes have `autocast` feature that takes in some data form and tries to automatically determine how to parse them into the right structured format. 
+
+In order to support three types of data class construction methods:
+1. Direct construction: `text = TextContent("Hello, world!")`
+2. Build from a value: `text = TextContent.build("Hello, world!")`
+3. Data class construction: `text = TextContent(text="Hello, world!")`
+
+We use this approach:
+`autocast()` method is the main automatic conversion method that determines how to parse the data. 
+It will return a sequence of values that map to the fields of the data class.
+
+In `__init__()` method, if `kwargs` are provided, we follow path 3 to construct the data class.
+If not, we do autocast to construct the data class (path 1)
+
+Alternatively, people can call `.build()` to construct the class. 
 """
 from typing import List, Dict, Any, Optional, Literal, Union, Iterable, Tuple
 from dataclasses import dataclass, field
@@ -513,6 +531,15 @@ class TextContent(ContentBlock):
 @dataclass
 class ImageContent(ContentBlock):
     """Image content block - supports URLs, base64, file paths, and numpy arrays.
+
+    OpenAI uses base64 encoded images in the image_data field and recombine it into a base64 string of the format `"image_url": f"data:image/jpeg;base64,{base64_image}"` when sending to the API.
+    Gemini uses raw bytes in the image_bytes field:
+    ```
+    types.Part.from_bytes(
+        data=image_bytes,
+        mime_type='image/jpeg',
+      )
+    ```
     
     Supports multiple ways to create an ImageContent:
     1. Direct instantiation with image_url or image_data
@@ -524,6 +551,7 @@ class ImageContent(ContentBlock):
     type: Literal["image"] = "image"
     image_url: Optional[str] = None
     image_data: Optional[str] = None  # base64 encoded
+    image_bytes: Optional[bytes] = None
     media_type: str = "image/jpeg"  # image/jpeg, image/png, image/gif, image/webp
     detail: Optional[str] = None  # OpenAI: "auto", "low", "high"
 
@@ -549,30 +577,37 @@ class ImageContent(ContentBlock):
             super().__init__(**kwargs)
         else:
             # Use autocast to detect and convert the value
-            image_url, image_data, media_type = self.autocast(value, format=format)
-            super().__init__(
-                image_url=image_url,
-                image_data=image_data,
-                media_type=media_type,
-            )
+            value_dict = self.autocast(value, format=format)
+            super().__init__(**value_dict)
+
+    def __str__(self) -> str:
+        # Truncate image_data and image_bytes for readability
+        image_data_str = f"{self.image_data[:10]}..." if self.image_data and len(self.image_data) > 10 else self.image_data
+        image_bytes_str = f"{str(self.image_bytes[:10])}..." if self.image_bytes and len(self.image_bytes) > 10 else self.image_bytes
+        return f"ImageContent(image_url={self.image_url}, image_data={image_data_str}, image_bytes={image_bytes_str}, media_type={self.media_type})"
+    
+    def __repr__(self) -> str:
+        # Truncate image_data and image_bytes for readability
+        image_data_str = f"{self.image_data[:10]}..." if self.image_data and len(self.image_data) > 10 else self.image_data
+        image_bytes_str = f"{str(self.image_bytes[:10])}..." if self.image_bytes and len(self.image_bytes) > 10 else self.image_bytes
+        return f"ImageContent(image_url={self.image_url}, image_data={image_data_str}, image_bytes={image_bytes_str}, media_type={self.media_type})"
 
     def is_empty(self) -> bool:
         """Check if the image content is empty (no URL or data)."""
-        return not self.image_url and not self.image_data
+        return not self.image_url and not self.image_data and not self.image_bytes
 
     def to_dict(self) -> Dict[str, Any]:
+        result = {
+            "type": self.type,
+            "media_type": self.media_type
+        }
         if self.image_url:
-            return {
-                "type": self.type,
-                "image_url": self.image_url,
-                "media_type": self.media_type
-            }
-        else:
-            return {
-                "type": self.type,
-                "image_data": self.image_data,
-                "media_type": self.media_type
-            }
+            result["image_url"] = self.image_url
+        if self.image_data:
+            result["image_data"] = self.image_data
+        if self.image_bytes:
+            result["image_bytes"] = self.image_bytes
+        return result
 
     @classmethod
     def from_file(cls, filepath: str, media_type: Optional[str] = None):
@@ -687,7 +722,7 @@ class ImageContent(ContentBlock):
             media_type: MIME type of the image (default: image/jpeg)
         
         Returns:
-            ImageContent with base64-encoded image data
+            ImageContent with base64-encoded data
         """
         image_data = base64.b64encode(data).decode('utf-8')
         return cls(image_data=image_data, media_type=media_type)
@@ -724,7 +759,7 @@ class ImageContent(ContentBlock):
             return cls(image_data=data_url.split(',')[-1], media_type="image/jpeg")
 
     @staticmethod
-    def autocast(value: Any, format: str = "PNG") -> Tuple[Optional[str], Optional[str], str]:
+    def autocast(value: Any, format: str = "PNG") -> Dict[str, Any]:
         """Auto-detect value type and return image field values.
         
         Args:
@@ -739,33 +774,38 @@ class ImageContent(ContentBlock):
             format: Image format for numpy arrays (PNG, JPEG, etc.). Default: PNG
         
         Returns:
-            Tuple of (image_url, image_data, media_type)
+            Dictionary with keys: image_url, image_data, image_bytes, media_type
         """
         # Handle None or empty
         if value is None:
-            return (None, None, "image/jpeg")
+            return {"image_url": None, "image_data": None, "image_bytes": None, "media_type": "image/jpeg"}
         
         # Handle ImageContentBlock instance
         if isinstance(value, ImageContent):
-            return (value.image_url, value.image_data, value.media_type)
+            return {
+                "image_url": value.image_url, 
+                "image_data": value.image_data, 
+                "image_bytes": value.image_bytes,
+                "media_type": value.media_type
+            }
         
         # Handle string inputs
         if isinstance(value, str):
             if not value.strip():
-                return (None, None, "image/jpeg")
+                return {"image_url": None, "image_data": None, "image_bytes": None, "media_type": "image/jpeg"}
             
             # Data URL
             if value.startswith('data:image/'):
                 try:
                     header, b64_data = value.split(',', 1)
                     media_type = header.split(':')[1].split(';')[0]
-                    return (None, b64_data, media_type)
+                    return {"image_url": None, "image_data": b64_data, "image_bytes": None, "media_type": media_type}
                 except (ValueError, IndexError):
-                    return (None, value.split(',')[-1], "image/jpeg")
+                    return {"image_url": None, "image_data": value.split(',')[-1], "image_bytes": None, "media_type": "image/jpeg"}
             
             # HTTP/HTTPS URL
             if value.startswith('http://') or value.startswith('https://'):
-                return (value, None, "image/jpeg")
+                return {"image_url": value, "image_data": None, "image_bytes": None, "media_type": "image/jpeg"}
             
             # File path
             path = Path(value)
@@ -780,14 +820,12 @@ class ImageContent(ContentBlock):
                 media_type = ext_to_type.get(path.suffix.lower(), 'image/jpeg')
                 with open(value, 'rb') as f:
                     image_data = base64.b64encode(f.read()).decode('utf-8')
-                return (None, image_data, media_type)
-            
-            return (None, None, "image/jpeg")
-        
-        # Handle bytes
+                return {"image_url": None, "image_data": image_data, "image_bytes": None, "media_type": media_type}
+                    
+        # Handle bytes - store as base64 for portability
         if isinstance(value, bytes):
             image_data = base64.b64encode(value).decode('utf-8')
-            return (None, image_data, "image/jpeg")
+            return {"image_url": None, "image_data": image_data, "image_bytes": None, "media_type": "image/jpeg"}
         
         # Handle PIL Image
         try:
@@ -800,7 +838,7 @@ class ImageContent(ContentBlock):
                 buffer.seek(0)
                 image_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
                 media_type = f"image/{img_format.lower()}"
-                return (None, image_data, media_type)
+                return {"image_url": None, "image_data": image_data, "image_bytes": None, "media_type": media_type}
         except ImportError:
             pass
         
@@ -834,11 +872,11 @@ class ImageContent(ContentBlock):
                 
                 image_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
                 media_type = f"image/{format.lower()}"
-                return (None, image_data, media_type)
+                return {"image_url": None, "image_data": image_data, "image_bytes": None, "media_type": media_type}
         except ImportError:
             pass
         
-        return (None, None, "image/jpeg")
+        return {"image_url": None, "image_data": None, "image_bytes": None, "media_type": "image/jpeg"}
 
     @classmethod
     def build(cls, value: Any, format: str = "PNG") -> 'ImageContent':
@@ -861,8 +899,8 @@ class ImageContent(ContentBlock):
         if isinstance(value, cls):
             return value
         
-        image_url, image_data, media_type = cls.autocast(value, format=format)
-        return cls(image_url=image_url, image_data=image_data, media_type=media_type)
+        value_dict = cls.autocast(value, format=format)
+        return cls(**value_dict)
 
     def set_image(self, image: Any, format: str = "PNG") -> None:
         """Set the image from various input formats (mutates self).
@@ -881,7 +919,48 @@ class ImageContent(ContentBlock):
         if result:
             self.image_url = result.image_url
             self.image_data = result.image_data
+            # Only copy image_bytes if it was explicitly set (e.g., from Google API)
+            if result.image_bytes:
+                self.image_bytes = result.image_bytes
             self.media_type = result.media_type
+    
+    def get_bytes(self) -> Optional[bytes]:
+        """Get raw image bytes.
+        
+        Returns image_bytes if available, otherwise decodes image_data from base64.
+        
+        Returns:
+            Raw image bytes or None if no image data available
+        """
+        if self.image_bytes:
+            return self.image_bytes
+        elif self.image_data:
+            return base64.b64decode(self.image_data)
+        return None
+    
+    def get_base64(self) -> Optional[str]:
+        """Get base64-encoded image data.
+        
+        Returns image_data if available, otherwise encodes image_bytes to base64.
+        
+        Returns:
+            Base64-encoded string or None if no image data available
+        """
+        if self.image_data:
+            return self.image_data
+        elif self.image_bytes:
+            return base64.b64encode(self.image_bytes).decode('utf-8')
+        return None
+    
+    def ensure_bytes(self) -> None:
+        """Ensure image_bytes is populated (converts from image_data if needed)."""
+        if not self.image_bytes and self.image_data:
+            self.image_bytes = base64.b64decode(self.image_data)
+    
+    def ensure_base64(self) -> None:
+        """Ensure image_data is populated (converts from image_bytes if needed)."""
+        if not self.image_data and self.image_bytes:
+            self.image_data = base64.b64encode(self.image_bytes).decode('utf-8')
 
 @dataclass
 class PDFContent(ContentBlock):
@@ -1130,6 +1209,8 @@ class ToolDefinition(ContentBlock):
 @dataclass
 class UserTurn:
     """Represents a user message turn in the conversation"""
+    role: str = "user"
+
     content: List[ContentBlock] = field(default_factory=list)
     tools: List[ToolDefinition] = field(default_factory=list)
 
@@ -1235,10 +1316,17 @@ class UserTurn:
             "content": content
         }
 
+@dataclass
+class Turn:
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
 
 @dataclass
-class AssistantTurn:
+class AssistantTurn(Turn):
     """Represents an assistant message turn in the conversation"""
+    role: str = "assistant"
     content: List[ContentBlock] = field(default_factory=list)
 
     # Tool usage (Option B: Everything in AssistantTurn)
@@ -1257,6 +1345,392 @@ class AssistantTurn:
     model: Optional[str] = None
     timestamp: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __init__(self, *args, **kwargs):
+        """
+        Initialize AssistantTurn from a raw response.
+        """
+        if len(args) > 0 and len(kwargs) == 0:
+            value_dict = self.autocast(args[0])
+            super().__init__(**value_dict)
+        else:
+            assert len(kwargs) > 0, "Either provide a raw response or keyword arguments"
+            super().__init__(**kwargs)
+
+    @staticmethod
+    def from_google_genai(value: Any) -> Dict[str, Any]:
+        """Parse a Google GenAI response into a dictionary of AssistantTurn fields.
+        
+        Supports both the legacy generate_content API and the new Interactions API.
+        
+        Args:
+            value: Raw response from Google GenAI API
+            
+        Returns:
+            Dict[str, Any]: Dictionary with keys corresponding to AssistantTurn fields
+        """
+        # Initialize the result dictionary with default values
+        result = {
+            "role": "assistant",
+            "content": [],
+            "tool_calls": [],
+            "tool_results": [],
+            "reasoning": None,
+            "finish_reason": None,
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "model": None,
+            "timestamp": None,
+            "metadata": {}
+        }
+        
+        # Check if this is a normalized response (from our GoogleGenAILLM)
+        if hasattr(value, 'raw_response'):
+            raw_response = value.raw_response
+        else:
+            raw_response = value
+        
+        # Handle Interactions API format (new)
+        if hasattr(raw_response, 'outputs'):
+            # This is an Interaction object
+            interaction = raw_response
+            
+            # Extract text from outputs
+            if interaction.outputs and len(interaction.outputs) > 0:
+                for output in interaction.outputs:
+                    if hasattr(output, 'text') and output.text:
+                        result["content"].append(TextContent(text=output.text))
+                    # Handle other output types if they exist
+                    elif hasattr(output, 'content'):
+                        # Content could be a list of parts
+                        if isinstance(output.content, list):
+                            for part in output.content:
+                                if hasattr(part, 'text') and part.text:
+                                    result["content"].append(TextContent(text=part.text))
+                        else:
+                            result["content"].append(TextContent(text=str(output.content)))
+            
+            # Extract model info
+            if hasattr(interaction, 'model'):
+                result["model"] = interaction.model
+            
+            # Extract status as finish_reason
+            if hasattr(interaction, 'status'):
+                result["finish_reason"] = interaction.status
+            
+            # Extract token usage from Interactions API
+            if hasattr(interaction, 'usage'):
+                usage = interaction.usage
+                if hasattr(usage, 'input_tokens'):
+                    result["prompt_tokens"] = usage.input_tokens
+                elif hasattr(usage, 'prompt_token_count'):
+                    result["prompt_tokens"] = usage.prompt_token_count
+                    
+                if hasattr(usage, 'output_tokens'):
+                    result["completion_tokens"] = usage.output_tokens
+                elif hasattr(usage, 'candidates_token_count'):
+                    result["completion_tokens"] = usage.candidates_token_count
+            
+            # Extract interaction ID as metadata
+            if hasattr(interaction, 'id'):
+                result["metadata"]['interaction_id'] = interaction.id
+        
+        # Handle legacy generate_content API format
+        else:
+            # Extract thinking/reasoning (for Gemini 2.5+ models)
+            if hasattr(raw_response, 'thoughts') and raw_response.thoughts:
+                # Gemini's thinking budget feature
+                result["reasoning"] = str(raw_response.thoughts)
+            
+            # Extract model info
+            if hasattr(raw_response, 'model_version'):
+                result["model"] = raw_response.model_version
+            
+            # Extract token usage (if available)
+            if hasattr(raw_response, 'usage_metadata'):
+                usage = raw_response.usage_metadata
+                if hasattr(usage, 'prompt_token_count'):
+                    result["prompt_tokens"] = usage.prompt_token_count
+                if hasattr(usage, 'candidates_token_count'):
+                    result["completion_tokens"] = usage.candidates_token_count
+            
+            # Handle multimodal content from Gemini (candidates with parts)
+            content_extracted = False
+            if hasattr(raw_response, 'candidates') and raw_response.candidates:
+                candidate = raw_response.candidates[0]
+                
+                # Extract from parts (supports multimodal responses with text and images)
+                if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                    for part in candidate.content.parts:
+                        # Handle text parts
+                        if hasattr(part, 'text') and part.text:
+                            result["content"].append(TextContent(text=part.text))
+                            content_extracted = True
+                        # Handle inline data (images, generated images, etc.)
+                        elif hasattr(part, 'inline_data'):
+                            # Try to extract image data, preferring direct inline_data access
+                            inline = part.inline_data
+                            image_bytes = None
+                            image_data = None
+                            media_type = 'image/jpeg'
+
+                            
+                            # Extract from inline_data Blob (most reliable method)
+                            # Google's Blob.data should be raw bytes
+                            if hasattr(inline, 'data'):
+                                data = inline.data
+                                # Check if it's bytes or string
+                                if isinstance(data, bytes):
+                                    # Store raw bytes for Gemini compatibility
+                                    # (Gemini prefers raw bytes when sending images)
+                                    image_bytes = data
+                                elif isinstance(data, str):
+                                    # Already base64-encoded string
+                                    image_data = data
+                                    # Don't decode to bytes - keep as base64 for portability
+                            
+                            if hasattr(inline, 'mime_type'):
+                                media_type = inline.mime_type
+                            
+                            # If we got the data, create ImageContent
+                            # Store image_bytes only if we got raw bytes from Google
+                            if image_data or image_bytes:
+                                result["content"].append(ImageContent(
+                                    image_data=image_data,
+                                    image_bytes=image_bytes if isinstance(data, bytes) else None,
+                                    media_type=media_type
+                                ))
+                                content_extracted = True
+                
+                # Extract finish reason
+                if hasattr(candidate, 'finish_reason'):
+                    result["finish_reason"] = str(candidate.finish_reason)
+            
+            # Fallback: Extract simple text content if no candidates/parts were found
+            if not content_extracted:
+                if hasattr(raw_response, 'text'):
+                    result["content"].append(TextContent(text=raw_response.text))
+                elif hasattr(value, 'choices'):
+                    # Fallback to normalized format
+                    result["content"].append(TextContent(text=value.choices[0].message.content))
+        
+        return result
+    
+    @staticmethod
+    def from_litellm_openai_response_api(value: Any) -> Dict[str, Any]:
+        """Parse a LiteLLM/OpenAI-style response into a dictionary of AssistantTurn fields.
+        
+        Handles both formats:
+        - New Responses API: Has 'output' field with ResponseOutputMessage objects
+        - Legacy Completion API: Has 'choices' field with message objects
+        
+        Args:
+            value: Response from LiteLLM/OpenAI API (Responses API or Completion API)
+            
+        Returns:
+            Dict[str, Any]: Dictionary with keys corresponding to AssistantTurn fields
+        """
+        # Initialize the result dictionary with default values
+        result = {
+            "role": "assistant",
+            "content": [],
+            "tool_calls": [],
+            "tool_results": [],
+            "reasoning": None,
+            "finish_reason": None,
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "model": None,
+            "timestamp": None,
+            "metadata": {}
+        }
+        
+        # Handle Responses API format (new format with 'output' field)
+        if hasattr(value, 'output') and hasattr(value, 'object') and value.object == 'response':
+            # Extract metadata
+            if hasattr(value, 'id'):
+                result["metadata"]['response_id'] = value.id
+            if hasattr(value, 'created_at'):
+                result["timestamp"] = str(value.created_at)
+            
+            # Extract model info
+            if hasattr(value, 'model'):
+                result["model"] = value.model
+            
+            # Extract status as finish_reason
+            if hasattr(value, 'status'):
+                result["finish_reason"] = value.status
+            
+            # Extract content from output
+            if value.output and len(value.output) > 0:
+                for output_item in value.output:
+                    # Handle ImageGenerationCall
+                    if hasattr(output_item, 'type') and output_item.type == 'image_generation_call':
+                        # Extract generated image
+                        if hasattr(output_item, 'result') and output_item.result:
+                            # Determine media type from output_format
+                            media_type = 'image/jpeg'  # default
+                            if hasattr(output_item, 'output_format'):
+                                format_map = {
+                                    'png': 'image/png',
+                                    'jpeg': 'image/jpeg',
+                                    'jpg': 'image/jpeg',
+                                    'webp': 'image/webp',
+                                    'gif': 'image/gif'
+                                }
+                                media_type = format_map.get(output_item.output_format.lower(), 'image/jpeg')
+                            
+                            # Add image to content
+                            result["content"].append(ImageContent(
+                                image_data=output_item.result,
+                                media_type=media_type
+                            ))
+                            
+                            # Store additional metadata about the image generation
+                            if hasattr(output_item, 'revised_prompt') and output_item.revised_prompt:
+                                if 'image_generation' not in result["metadata"]:
+                                    result["metadata"]['image_generation'] = []
+                                result["metadata"]['image_generation'].append({
+                                    'id': output_item.id if hasattr(output_item, 'id') else None,
+                                    'revised_prompt': output_item.revised_prompt,
+                                    'size': output_item.size if hasattr(output_item, 'size') else None,
+                                    'quality': output_item.quality if hasattr(output_item, 'quality') else None,
+                                    'status': output_item.status if hasattr(output_item, 'status') else None
+                                })
+                    
+                    # Handle ResponseOutputMessage
+                    elif hasattr(output_item, 'type') and output_item.type == 'message':
+                        # Extract role
+                        if hasattr(output_item, 'role'):
+                            result["role"] = output_item.role
+                        
+                        # Extract status for this message
+                        if hasattr(output_item, 'status') and not result["finish_reason"]:
+                            result["finish_reason"] = output_item.status
+                        
+                        # Extract content items
+                        if hasattr(output_item, 'content') and output_item.content:
+                            for content_item in output_item.content:
+                                # Handle text content
+                                if hasattr(content_item, 'type') and content_item.type == 'output_text':
+                                    if hasattr(content_item, 'text') and content_item.text:
+                                        result["content"].append(TextContent(text=content_item.text))
+                                # Handle other content types as they become available
+                                elif hasattr(content_item, 'text') and content_item.text:
+                                    result["content"].append(TextContent(text=str(content_item.text)))
+            
+            # Extract reasoning (for models with reasoning capabilities)
+            if hasattr(value, 'reasoning'):
+                reasoning_parts = []
+                if isinstance(value.reasoning, dict):
+                    if value.reasoning.get('summary'):
+                        reasoning_parts.append(f"Summary: {value.reasoning['summary']}")
+                    if value.reasoning.get('effort'):
+                        reasoning_parts.append(f"Effort: {value.reasoning['effort']}")
+                    if reasoning_parts:
+                        result["reasoning"] = "\n".join(reasoning_parts)
+                elif value.reasoning:
+                    result["reasoning"] = str(value.reasoning)
+            
+            # Extract token usage (Responses API format)
+            if hasattr(value, 'usage'):
+                if hasattr(value.usage, 'input_tokens'):
+                    result["prompt_tokens"] = value.usage.input_tokens
+                if hasattr(value.usage, 'output_tokens'):
+                    result["completion_tokens"] = value.usage.output_tokens
+        
+        # Handle legacy Completion API format (has 'choices' field)
+        elif hasattr(value, 'choices') and len(value.choices) > 0:
+            choice = value.choices[0]
+            message = choice.message if hasattr(choice, 'message') else choice
+            
+            # Extract text content
+            if hasattr(message, 'content') and message.content:
+                result["content"].append(TextContent(text=str(message.content)))
+            
+            # Extract tool calls
+            if hasattr(message, 'tool_calls') and message.tool_calls:
+                for tc in message.tool_calls:
+                    tool_call = ToolCall(
+                        id=tc.id if hasattr(tc, 'id') else None,
+                        type=tc.type if hasattr(tc, 'type') else "function",
+                        name=tc.function.name if hasattr(tc, 'function') else tc.name,
+                        arguments=json.loads(tc.function.arguments) if hasattr(tc, 'function') and hasattr(tc.function, 'arguments') else {}
+                    )
+                    result["tool_calls"].append(tool_call)
+            
+            # Extract finish reason
+            if hasattr(choice, 'finish_reason'):
+                result["finish_reason"] = choice.finish_reason
+            
+            # Extract reasoning/thinking (for OpenAI o1/o3 models)
+            if hasattr(message, 'reasoning') and message.reasoning:
+                result["reasoning"] = message.reasoning
+            
+            # Extract token usage (Completion API format)
+            if hasattr(value, 'usage'):
+                if hasattr(value.usage, 'prompt_tokens'):
+                    result["prompt_tokens"] = value.usage.prompt_tokens
+                if hasattr(value.usage, 'completion_tokens'):
+                    result["completion_tokens"] = value.usage.completion_tokens
+            
+            # Extract model info
+            if hasattr(value, 'model'):
+                result["model"] = value.model
+        
+        return result
+    
+    @staticmethod
+    def autocast(value: Any) -> Dict[str, Any]:
+        """Automatically parse a response from any API into a dictionary of AssistantTurn fields.
+        
+        Automatically detects the response format and uses the appropriate parser:
+        - Google GenAI (generate_content or Interactions API)
+        - LiteLLM/OpenAI Responses API (new format with 'output' field)
+        - LiteLLM/OpenAI Completion API (legacy format with 'choices' field)
+        
+        Args:
+            value: Raw response from any supported API
+            
+        Returns:
+            Dict[str, Any]: Dictionary with keys corresponding to AssistantTurn fields
+        """
+        # Check if this is a normalized response (from our GoogleGenAILLM)
+        raw_response = value.raw_response if hasattr(value, 'raw_response') else value
+        
+        # Detect Google GenAI format (Interactions API or generate_content)
+        # Google GenAI has 'outputs' (Google Interactions API) or 'candidates' (generate_content)
+        # Note: 'outputs' is for Google's Interactions API, 'output' is for LiteLLM Responses API
+        if hasattr(raw_response, 'outputs') or \
+           (hasattr(raw_response, 'candidates') and not hasattr(value, 'choices')) or \
+           hasattr(raw_response, 'usage_metadata'):
+            return AssistantTurn.from_google_genai(value)
+        
+        # Detect LiteLLM/OpenAI format (Responses API or Completion API)
+        # Responses API has 'output' field and object='response'
+        # Completion API has 'choices' field
+        elif hasattr(value, 'output') or hasattr(value, 'choices'):
+            return AssistantTurn.from_litellm_openai_response_api(value)
+        
+        # Fallback: if has 'text' attribute, might be a simple Google response
+        elif hasattr(raw_response, 'text'):
+            return AssistantTurn.from_google_genai(value)
+        
+        # Default to empty result if format is not recognized
+        else:
+            return {
+                "role": "assistant",
+                "content": [],
+                "tool_calls": [],
+                "tool_results": [],
+                "reasoning": None,
+                "finish_reason": None,
+                "prompt_tokens": None,
+                "completion_tokens": None,
+                "model": None,
+                "timestamp": None,
+                "metadata": {}
+            }
 
     def add_text(self, text: str) -> 'AssistantTurn':
         """Add text content"""
@@ -1293,7 +1767,7 @@ class AssistantTurn:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format"""
         return {
-            "role": "assistant",
+            "role": self.role,
             "content": [c.to_dict() for c in self.content],
             "tool_calls": [tc.to_dict() for tc in self.tool_calls] if self.tool_calls else None,
             "tool_results": [tr.to_dict() for tr in self.tool_results] if self.tool_results else None,
@@ -1307,7 +1781,7 @@ class AssistantTurn:
 
     def to_litellm_format(self) -> Dict[str, Any]:
         """Convert to LiteLLM format (OpenAI-compatible, works with all providers)"""
-        result = {"role": "assistant"}
+        result = {"role": self.role}
 
         if self.content:
             # For multimodal or simple text response

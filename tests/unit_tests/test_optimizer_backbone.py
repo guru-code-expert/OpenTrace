@@ -9,13 +9,10 @@ We need to test a few things:
 """
 import os
 import pytest
-import base64
-from opto.optimizers.backbone import (
+from opto.utils.backbone import (
     ConversationHistory,
     UserTurn,
-    AssistantTurn,
-    TextContent,
-    ImageContent
+    AssistantTurn
 )
 
 # Skip tests if no API credentials are available
@@ -492,6 +489,57 @@ def test_real_llm_multi_turn_with_images():
     
     print("\n✅ Multi-turn conversation with images completed successfully!")
 
+# ==== Testing the Automatic Raw Response Parsing into AssistantTurn ===
+@pytest.mark.skipif(not HAS_CREDENTIALS, reason=SKIP_REASON)
+def test_automatic_openai_raw_response_parsing_into_assistant_turn():
+    import litellm
+    import base64
+
+    # Simple OpenAI text generation
+    response = litellm.responses(
+        model="openai/gpt-4o",
+        input="Hello, how are you?"
+    )
+    assistant_turn = AssistantTurn(response)
+    assert "Hello" in assistant_turn.content[0].text
+
+    print(assistant_turn)
+
+@pytest.mark.skipif(not HAS_CREDENTIALS, reason=SKIP_REASON)
+def test_automatic_openai_multimodal_raw_response_parsing_into_assistant_turn():
+    import litellm
+    import base64
+
+    # OpenAI models require tools parameter for image generation
+    response = litellm.responses(
+        model="openai/gpt-4o",
+        input="Generate a futuristic city at sunset and describe it in a sentence.",
+        tools=[{"type": "image_generation"}]
+    )
+
+    assistant_turn = AssistantTurn(response)
+    print(assistant_turn)
+
+
+@pytest.mark.skipif(not HAS_CREDENTIALS, reason=SKIP_REASON)
+def test_automatic_google_generate_content_raw_response_parsing_into_assistant_turn():
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash-image",
+        contents="A kawaii-style sticker of a happy red panda wearing a tiny bamboo hat. It's munching on a green bamboo leaf. The design features bold, clean outlines, simple cel-shading, and a vibrant color palette. The background must be white.",
+    )
+
+    assistant_turn = AssistantTurn(response)
+    print(assistant_turn)
+
+    assert not assistant_turn.content[1].is_empty()
+
+    
+
 if __name__ == '__main__':
     import litellm
     import base64
@@ -513,4 +561,5 @@ if __name__ == '__main__':
                 f.write(image_bytes)
 
     print(f"Image saved: generated_{response.output[0].id}.png")
+
 
