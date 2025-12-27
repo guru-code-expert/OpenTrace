@@ -1348,14 +1348,35 @@ class AssistantTurn(Turn):
 
     def __init__(self, *args, **kwargs):
         """
-        Initialize AssistantTurn from a raw response.
+        Initialize AssistantTurn from a raw response or with explicit fields.
+        
+        Three ways to initialize:
+        1. Empty: AssistantTurn() - creates empty turn with defaults
+        2. From raw response: AssistantTurn(response) - autocasts the response
+        3. With fields: AssistantTurn(role="assistant", content=[...]) - explicit fields
         """
         if len(args) > 0 and len(kwargs) == 0:
+            # Case 2: Single positional arg - autocast from raw response
             value_dict = self.autocast(args[0])
             super().__init__(**value_dict)
-        else:
-            assert len(kwargs) > 0, "Either provide a raw response or keyword arguments"
+        elif len(kwargs) > 0:
+            # Case 3: Keyword arguments - use them directly
             super().__init__(**kwargs)
+        else:
+            # Case 1: No arguments - initialize with defaults
+            super().__init__(
+                role="assistant",
+                content=[],
+                tool_calls=[],
+                tool_results=[],
+                reasoning=None,
+                finish_reason=None,
+                prompt_tokens=None,
+                completion_tokens=None,
+                model=None,
+                timestamp=None,
+                metadata={}
+            )
 
     @staticmethod
     def from_google_genai(value: Any) -> Dict[str, Any]:

@@ -8,6 +8,7 @@ We need to test a few things:
 3. Multi-modal use of conversation manager, including multi-turn and image as output
 """
 import os
+import base64
 import pytest
 from opto.utils.backbone import (
     ConversationHistory,
@@ -473,7 +474,7 @@ def test_real_llm_multi_turn_with_images():
     print("  Which of these flowers would be better for a romantic gift and why?")
     
     response2 = llm(messages=messages, max_tokens=300)
-    response2_content = response2.choicbes[0].message.content
+    response2_content = response2.choices[0].message.content
     
     print("\n🤖 Turn 2 - Assistant:")
     print(f"  {response2_content[:200]}...")

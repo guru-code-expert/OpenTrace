@@ -1,5 +1,4 @@
 """
-This adapater is for three cases:
 When MM (multimodal) is enabled, we primarily either use:
 1. LiteLLM's response API
 2. Google's Interaction API design (not supported by LiteLLM response API at all)
