@@ -506,31 +506,90 @@ class GoogleGenAILLM(AbstractModel):
             system_instruction = kwargs.pop('system_instruction', None)
             
             # Handle messages parameter for automatic system instruction extraction
-            messages = kwargs.get('messages', None)
+            messages = kwargs.pop('messages', None)
             if messages:
                 # If system_instruction is explicitly passed, drop any system messages
                 if system_instruction is not None:
                     # Filter out system messages
                     filtered_messages = [msg for msg in messages if msg.get('role') != 'system']
-                    kwargs['messages'] = filtered_messages
                 else:
                     # If system_instruction not passed, check if first message is system
                     if messages and messages[0].get('role') == 'system':
                         system_instruction = messages[0].get('content')
                         # Remove the system message from messages
-                        kwargs['messages'] = messages[1:]
+                        filtered_messages = messages[1:]
+                    else:
+                        filtered_messages = messages
+                
+                # Convert messages to Google GenAI contents format
+                # Google GenAI expects contents as a list of content items
+                contents = []
+                for msg in filtered_messages:
+                    role = msg.get('role')
+                    content = msg.get('content')
+                    
+                    # Map roles: user -> user, assistant -> model
+                    if role == 'assistant':
+                        role = 'model'
+                    
+                    # Handle content (can be string or list of content blocks)
+                    if isinstance(content, str):
+                        contents.append({'role': role, 'parts': [{'text': content}]})
+                    elif isinstance(content, list):
+                        # Convert content blocks to parts
+                        parts = []
+                        for block in content:
+                            if block.get('type') == 'text':
+                                parts.append({'text': block.get('text', '')})
+                            elif block.get('type') == 'image_url':
+                                # Handle image URLs
+                                image_url = block.get('image_url', {}).get('url', '')
+                                if image_url.startswith('data:'):
+                                    # Extract base64 data
+                                    import re
+                                    match = re.match(r'data:([^;]+);base64,(.+)', image_url)
+                                    if match:
+                                        mime_type, data = match.groups()
+                                        parts.append({'inline_data': {'mime_type': mime_type, 'data': data}})
+                                else:
+                                    # External URL
+                                    parts.append({'file_data': {'file_uri': image_url}})
+                        if parts:
+                            contents.append({'role': role, 'parts': parts})
+                
+                # Use converted contents instead of args
+                # Don't wrap in tuple since we're passing as keyword argument
+                contents_to_use = contents if contents else args[0] if args else None
+            else:
+                # No messages parameter, use args as-is
+                contents_to_use = args[0] if args else None
+            
+            # Map max_tokens to max_output_tokens for Google GenAI
+            if 'max_tokens' in kwargs:
+                kwargs['max_output_tokens'] = kwargs.pop('max_tokens')
+            
+            # Remove any other parameters that shouldn't go to GenerateContentConfig
+            # Keep only valid config parameters
+            valid_config_params = {
+                'temperature', 'max_output_tokens', 'top_p', 'top_k', 
+                'stop_sequences', 'candidate_count', 'presence_penalty',
+                'frequency_penalty', 'response_mime_type', 'response_schema'
+            }
+            config_kwargs = {k: v for k, v in kwargs.items() if k in valid_config_params}
             
             if system_instruction:
                 config_params_with_system = {**config_params, 'system_instruction': system_instruction}
             else:
                 config_params_with_system = config_params
             
-            return client.models.generate_content(
+            response = client.models.generate_content(
                 model=model_name,
-                contents=args,
-                config=types.GenerateContentConfig(**{**config_params_with_system, **kwargs})
+                contents=contents_to_use,
+                config=types.GenerateContentConfig(**{**config_params_with_system, **config_kwargs})
             )
 
+            return response
+            
         return lambda *args, **kwargs: retry_with_exponential_backoff(
             lambda: api_func(model_name, *args, **{**default_params, **kwargs}),
             max_retries=5,
@@ -687,7 +746,7 @@ class LLMFactory:
             # Determine backend with priority: Gemini models > explicit backend > default
             if model.startswith('gemini'):
                 # Gemini models use GoogleGenAILLM backend (highest priority)
-                backend_cls = _LLM_REGISTRY['GoogleGenAILLM']
+                backend_cls = _LLM_REGISTRY['GoogleGenAI']
                 # Strip 'gemini/' prefix if present (LiteLLM format: gemini/gemini-pro)
                 if model.startswith('gemini/'):
                     model = model[len('gemini/'):]
@@ -853,7 +912,7 @@ class LLM:
         print(response.choices[0].message.content)  # Raw API response
         
         # Google Gemini - Use system_instruction parameter (not in messages array)
-        llm = LLM(backend="GoogleGenAI", model="gemini-2.5-flash", mm_beta=True)
+        llm = LLM(backend="GoogleGenAI", model="gemini-2.5-flash-image", mm_beta=True)
         response = llm(
             "Hello there",
             system_instruction="You are a helpful assistant."
@@ -861,7 +920,7 @@ class LLM:
         print(response.get_text())  # AssistantTurn object
         
         # Gemini with messages format (system_instruction separate from messages)
-        llm = LLM(backend="GoogleGenAI", model="gemini-2.5-flash", mm_beta=True)
+        llm = LLM(backend="GoogleGenAI", model="gemini-2.5-flash-image", mm_beta=True)
         response = llm(
             messages=[
                 {"role": "user", "content": "What is your purpose?"}
@@ -891,7 +950,7 @@ class LLM:
         # Explicitly specify backend (default: LiteLLM)
         llm = LLM(backend="AutoGen", config_list=my_configs)
         llm = LLM(backend="CustomLLM", model="llama-3.1-8b")
-        llm = LLM(backend="GoogleGenAI", model="gemini-2.5-flash")
+        llm = LLM(backend="GoogleGenAI", model="gemini-2.5-flash-image")
         
         # Or set via environment variable
         # export TRACE_DEFAULT_LLM_BACKEND=AutoGen
@@ -940,15 +999,16 @@ class LLM:
     """
     def __new__(cls, model: str = None, profile: str = 'default', backend: str = None, 
                 mm_beta: bool = False, **kwargs):
-        # Priority 1: If profile is specified, use LLMFactory
-        if profile:
-            return LLMFactory.get_llm(profile=profile, mm_beta=mm_beta, **kwargs)
-        
-        # Priority 2: If model is specified, use LLMFactory with model
+
+        # Priority 1: If model is specified, use LLMFactory with model
         if model:
             if backend is not None:
                 kwargs['backend'] = backend
             return LLMFactory.get_llm(model=model, mm_beta=mm_beta, **kwargs)
+        
+        # Priority 2: If profile is specified, use LLMFactory
+        if profile:
+            return LLMFactory.get_llm(profile=profile, mm_beta=mm_beta, **kwargs)
         
         # Priority 3: Use backend-specific instantiation (for AutoGen, CustomLLM, etc.)
         # This path is for when neither profile nor model is specified

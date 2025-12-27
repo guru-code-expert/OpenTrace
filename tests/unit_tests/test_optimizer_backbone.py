@@ -490,6 +490,132 @@ def test_real_llm_multi_turn_with_images():
     
     print("\n✅ Multi-turn conversation with images completed successfully!")
 
+
+@pytest.mark.skipif(not HAS_CREDENTIALS, reason=SKIP_REASON)
+def test_real_llm_multi_turn_with_images_updated_assistant_turn():
+    """Test a multi-turn conversation with images.
+    
+    First turn: Ask about images
+    Second turn: Follow-up question about the same images
+    """
+    from opto.utils.llm import LLM
+    
+    history = ConversationHistory(system_prompt="You are a helpful assistant that can analyze images.")
+    llm = LLM()
+    
+    print("\n" + "="*80)
+    print("MULTI-TURN CONVERSATION WITH IMAGES")
+    print("="*80)
+    
+    # Turn 1: Send images and ask about them
+    user_turn1 = (UserTurn()
+                  .add_text("What type of flowers are shown in these images?")
+                  .add_image(url="https://images.pexels.com/photos/736230/pexels-photo-736230.jpeg")
+                  .add_image(url="https://images.contentstack.io/v3/assets/bltcedd8dbd5891265b/blt134818d279038650/6668df6434f6fb5cd48aac34/beautiful-flowers-rose.jpeg"))
+    
+    history.add_user_turn(user_turn1)
+    messages = history.to_litellm_format()
+    
+    print("\n📷 Turn 1 - User:")
+    print("  What type of flowers are shown in these images? [+ 2 images]")
+    
+    response1 = llm(messages=messages, max_tokens=300)
+    at = AssistantTurn(response1)
+    
+    print("\n🤖 Turn 1 - Assistant:")
+    print(f"  {at.get_text()[:200]}...")
+    
+    history.add_assistant_turn(at)
+    
+    # Turn 2: Follow-up question (no new images, but context from previous turn)
+    user_turn2 = UserTurn().add_text("Which of these flowers would be better for a romantic gift and why?")
+    history.add_user_turn(user_turn2)
+    
+    messages = history.to_litellm_format()
+    
+    print("\n📷 Turn 2 - User:")
+    print("  Which of these flowers would be better for a romantic gift and why?")
+    
+    response2 = llm(messages=messages, max_tokens=300)
+    response2_content = response2.choices[0].message.content
+    
+    print("\n🤖 Turn 2 - Assistant:")
+    print(f"  {response2_content[:200]}...")
+    
+    # Verify responses
+    assert at.get_text() is not None and len(at.get_text()) > 20
+    assert response2_content is not None and len(response2_content) > 20
+    
+    # Turn 2 should reference the context from turn 1
+    response2_lower = response2_content.lower()
+    assert any(word in response2_lower for word in ["flower", "rose", "romantic", "gift", "love"]), \
+        "Turn 2 response doesn't seem to reference the flower context"
+    
+    print("\n✅ Multi-turn conversation with images completed successfully!")
+
+@pytest.mark.skipif(not os.environ.get("GEMINI_API_KEY"), reason="No GEMINI_API_KEY found")
+def test_real_google_genai_multi_turn_with_images_updated():
+    """Test multi-turn conversation with images using Google Gemini image generation model"""
+    from opto.utils.llm import LLM
+    
+    print("\n" + "="*80)
+    print("Testing Multi-turn Conversation with Gemini Image Generation")
+    print("="*80)
+    
+    # Initialize conversation history
+    history = ConversationHistory()
+    history.system_prompt = "You are a helpful assistant that can generate and discuss images."
+    
+    # Use a Gemini model that supports image generation
+    model = "gemini-2.5-flash-image"
+    llm = LLM(model=model)
+    
+    print("="*80)
+    
+    # Turn 1: Ask to generate an image
+    user_turn1 = UserTurn().add_text("Generate an image of a serene mountain landscape at sunrise with a lake in the foreground.")
+    
+    history.add_user_turn(user_turn1)
+    messages = history.to_litellm_format()
+    
+    print("\n📷 Turn 1 - User:")
+    print("  Generate an image of a serene mountain landscape at sunrise with a lake in the foreground.")
+    
+    response1 = llm(messages=messages, max_tokens=300)
+    at = AssistantTurn(response1)
+    
+    print("\n🤖 Turn 1 - Assistant:")
+    print(f"  {at.get_text()[:200] if at.get_text() else '[Image generated]'}...")
+    
+    history.add_assistant_turn(at)
+    
+    # Turn 2: Follow-up question about the generated image
+    user_turn2 = UserTurn().add_text("Can you describe the colors and mood of the image you just generated?")
+    history.add_user_turn(user_turn2)
+    
+    messages = history.to_litellm_format()
+    
+    print("\n📷 Turn 2 - User:")
+    print("  Can you describe the colors and mood of the image you just generated?")
+    
+    response2 = llm(messages=messages, max_tokens=300)
+    at2 = AssistantTurn(response2)
+    response2_content = at2.get_text()
+    
+    print("\n🤖 Turn 2 - Assistant:")
+    print(f"  {response2_content[:200]}...")
+    
+    # Verify responses
+    assert at.content is not None and len(at.content) > 0
+    assert response2_content is not None and len(response2_content) > 20
+    
+    # Turn 2 should reference the context from turn 1
+    response2_lower = response2_content.lower()
+    assert any(word in response2_lower for word in ["mountain", "sunrise", "lake", "color", "mood", "landscape"]), \
+        "Turn 2 response doesn't seem to reference the image generation context"
+    
+    print("\n✅ Multi-turn conversation with Gemini image generation completed successfully!")
+
 # ==== Testing the Automatic Raw Response Parsing into AssistantTurn ===
 @pytest.mark.skipif(not HAS_CREDENTIALS, reason=SKIP_REASON)
 def test_automatic_openai_raw_response_parsing_into_assistant_turn():
@@ -522,7 +648,7 @@ def test_automatic_openai_multimodal_raw_response_parsing_into_assistant_turn():
     print(assistant_turn)
 
 
-@pytest.mark.skipif(not HAS_CREDENTIALS, reason=SKIP_REASON)
+@pytest.mark.skipif(not os.environ.get("GEMINI_API_KEY"), reason="No GEMINI_API_KEY found")
 def test_automatic_google_generate_content_raw_response_parsing_into_assistant_turn():
     from google import genai
     from google.genai import types
@@ -562,5 +688,10 @@ if __name__ == '__main__':
                 f.write(image_bytes)
 
     print(f"Image saved: generated_{response.output[0].id}.png")
+
+    from google import genai
+
+    client = genai.Client()
+    chat = client.chats.create(model="gemini-2.5-flash")
 
 
