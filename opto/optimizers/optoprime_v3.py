@@ -219,9 +219,22 @@ class OptimizerPromptSymbolSetJSON(OptimizerPromptSymbolSet):
         reasoning = "(Unable to extract, possibly due to parsing failure)"
 
         if "```" in response:
-            match = re.findall(r"```(.*?)```", response, re.DOTALL)
-            if len(match) > 0:
-                response = match[0]
+            # First try to extract from ```json ... ``` blocks
+            json_match = re.findall(r"```json\s*(.*?)```", response, re.DOTALL)
+            if len(json_match) > 0:
+                response = json_match[0].strip()
+            else:
+                # Fall back to regular ``` ... ``` blocks
+                match = re.findall(r"```(.*?)```", response, re.DOTALL)
+                if len(match) > 0:
+                    # Remove language identifier if present (e.g., "json", "python")
+                    content = match[0].strip()
+                    # Check if first line is a language identifier
+                    lines = content.split('\n', 1)
+                    if len(lines) > 1 and lines[0].strip().isalpha() and len(lines[0].strip()) < 20:
+                        response = lines[1].strip()
+                    else:
+                        response = content
 
         json_extracted = {}
         suggestion = {}
