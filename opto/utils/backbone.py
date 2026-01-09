@@ -20,16 +20,19 @@ If not, we do autocast to construct the data class (path 1)
 
 Alternatively, people can call `.build()` to construct the class. 
 """
-from typing import List, Dict, Any, Optional, Literal, Union, Iterable, Tuple
+from typing import List, Dict, Any, Optional, Literal, Union, Iterable, Tuple, TypeVar, Generic
 from dataclasses import dataclass, field
 import json
 import base64
 from pathlib import Path
 import warnings
 
+from PIL import Image
+import io
+
 
 # Default placeholder for images that cannot be rendered as text
-DEFAULT_IMAGE_PLACEHOLDER = "[IMAGE]"
+DEFAULT_IMAGE_PLACEHOLDER = "\n[IMAGE]\n"
 
 @dataclass
 class ContentBlock:
@@ -77,6 +80,10 @@ class ContentBlockList(list):
     - ImageContent -> [ImageContent]
     - List[ContentBlock] -> ContentBlockList
     - None/empty -> []
+    
+    Note: This list can contain mixed types of ContentBlocks (text, images, PDFs, etc.).
+    Type annotations like ContentBlockList[TextContent] are used for documentation
+    purposes in specialized methods but don't restrict the actual content.
     """
 
     def __init__(self, content: Union[str, 'ContentBlock', List['ContentBlock'], None] = None):
@@ -115,11 +122,27 @@ class ContentBlockList(list):
         if isinstance(content, cls):
             return content
         return cls(content)
+    
+    def __getitem__(self, key: Union[int, slice]) -> Union['ContentBlock', 'ContentBlockList']:
+        """Support indexing and slicing.
+        
+        Args:
+            key: Integer index or slice object
+            
+        Returns:
+            ContentBlock for single index, ContentBlockList for slices
+        """
+        if isinstance(key, slice):
+            # Return a new ContentBlockList with the sliced items
+            return ContentBlockList(list.__getitem__(self, key))
+        else:
+            # Return the single item for integer index
+            return list.__getitem__(self, key)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"type": "list", "blocks": [b.to_dict() for b in self]}
     
-    def append(self, item: Union[str, 'ContentBlock']) -> 'ContentBlockList':
+    def append(self, item: Union[str, 'ContentBlock', 'ContentBlockList']) -> 'ContentBlockList':
         """Append a string or ContentBlock, merging consecutive text.
         
         Args:
@@ -139,6 +162,9 @@ class ContentBlockList(list):
                 self[-1] = TextContent(text=self[-1].text + " " + item.text)
             else:
                 super().append(item)
+        elif isinstance(item, ContentBlockList):
+            # we silently call extend here
+            super().extend(item)
         else:
             # Other ContentBlock types (ImageContent, etc.): just add
             super().append(item)
@@ -193,23 +219,22 @@ class ContentBlockList(list):
     def has_images(self) -> bool:
         """Check if the content block list contains any images."""
         return any(isinstance(block, ImageContent) for block in self)
-    
+
     def has_text(self) -> bool:
         """Check if the content block list contains any text."""
         return any(isinstance(block, TextContent) for block in self)
 
     # --- Multimodal utilities ---
-    
     @staticmethod
     def blocks_to_text(blocks: Iterable['ContentBlock'],
                        image_placeholder: str = DEFAULT_IMAGE_PLACEHOLDER) -> str:
         """Convert any iterable of ContentBlocks to text representation.
         
         This is a utility that can be used by composite classes containing
-        multiple ContentBlockLists.
+        multiple ContentBlockLists. Handles nested ContentBlockLists recursively.
         
         Args:
-            blocks: Iterable of ContentBlock objects
+            blocks: Iterable of ContentBlock objects (may include nested ContentBlockLists)
             image_placeholder: Placeholder string for images (default: "[IMAGE]")
             
         Returns:
@@ -221,8 +246,13 @@ class ContentBlockList(list):
                 text_parts.append(block.text)
             elif isinstance(block, ImageContent):
                 text_parts.append(image_placeholder)
+            elif isinstance(block, ContentBlockList):
+                # Recursively handle nested ContentBlockList
+                nested_text = ContentBlockList.blocks_to_text(block, image_placeholder)
+                if nested_text:
+                    text_parts.append(nested_text)
         return " ".join(text_parts)
-    
+        
     def to_text(self, image_placeholder: str = DEFAULT_IMAGE_PLACEHOLDER) -> str:
         """Convert this list to text representation.
         
@@ -233,14 +263,6 @@ class ContentBlockList(list):
             str: Text representation where images are replaced with placeholder.
         """
         return self.blocks_to_text(self, image_placeholder)
-    
-    def has_images(self) -> bool:
-        """Check if any image content exists in this list.
-        
-        Returns:
-            bool: True if any ImageContent block is present.
-        """
-        return any(isinstance(block, ImageContent) for block in self)
     
     def __bool__(self) -> bool:
         """Check if there's any actual content (not just empty text).
@@ -276,6 +298,96 @@ class ContentBlockList(list):
             ContentBlockList: Self reference.
         """
         return self
+    
+    def count_blocks(self) -> Dict[str, int]:
+        """Count blocks by type, including nested structures.
+        
+        Recursively traverses the content block structure and counts
+        each block type by its class name.
+        
+        Returns:
+            Dict[str, int]: Dictionary mapping block class names to counts.
+                           Example: {"TextContent": 3, "ImageContent": 1}
+        """
+        counts: Dict[str, int] = {}
+        
+        def _count_recursive(item: Any) -> None:
+            """Recursively count blocks in nested structures."""
+            if isinstance(item, ContentBlock):
+                # Count this block
+                class_name = item.__class__.__name__
+                counts[class_name] = counts.get(class_name, 0) + 1
+                
+                # Check if this block has any attributes that might contain nested blocks
+                if hasattr(item, '__dict__'):
+                    for attr_value in item.__dict__.values():
+                        if isinstance(attr_value, (ContentBlockList, list)):
+                            for nested_item in attr_value:
+                                _count_recursive(nested_item)
+                        elif isinstance(attr_value, ContentBlock):
+                            _count_recursive(attr_value)
+            elif isinstance(item, (ContentBlockList, list)):
+                # Recursively count items in lists
+                for nested_item in item:
+                    _count_recursive(nested_item)
+        
+        # Count all blocks in this list
+        for block in self:
+            _count_recursive(block)
+        
+        return counts
+    
+    def to_litellm_format(self, role: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Convert content blocks to LiteLLM Response API format.
+        
+        Args:
+            role: Optional role context ("user" or "assistant") to determine the correct type.
+                  If not provided, defaults to "user" for backward compatibility.
+        
+        Returns:
+            List[Dict[str, Any]]: List of content block dictionaries in Response API format
+        """
+        if role is None:
+            role = "user"
+        
+        content = []
+        for block in self:
+            # Skip empty content blocks
+            if block.is_empty():
+                continue
+            
+            # Handle different content block types
+            if isinstance(block, TextContent):
+                # Pass role context to TextContent for proper type selection
+                content.append(block.to_litellm_format(role=role))
+            elif isinstance(block, ImageContent):
+                # ImageContent always uses input_image for user messages
+                content.append(block.to_litellm_format())
+            elif isinstance(block, PDFContent):
+                # LiteLLM supports PDFs for providers like Claude
+                # Use input_file type with PDF data URL for Response API
+                if block.pdf_url:
+                    warnings.warn("PDF URLs may not be supported by all providers through LiteLLM")
+                    content.append({"type": "input_text", "text": f"[PDF: {block.pdf_url}]"})
+                else:
+                    # Encode as data URL for providers that support PDFs
+                    data_url = f"data:application/pdf;base64,{block.pdf_data}"
+                    content.append({"type": "input_file", "input_file": {"url": data_url}})
+            elif isinstance(block, FileContent):
+                # For file content, add as text or data URL based on type
+                if block.is_binary:
+                    data_url = f"data:{block.mime_type};base64,{block.file_data}"
+                    content.append({"type": "input_file", "input_file": {"url": data_url}})
+                else:
+                    content.append({"type": "input_text", "text": f"[File: {block.filename}]\n{block.file_data}"})
+            elif hasattr(block, 'to_litellm_format'):
+                # Fallback: use block's own to_litellm_format method
+                content.append(block.to_litellm_format())
+            else:
+                # Last resort: use to_dict()
+                content.append(block.to_dict())
+        
+        return content
 
 
 class PromptTemplate:
@@ -495,7 +607,21 @@ class TextContent(ContentBlock):
         return cls(text=str(value))
 
     def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
         return {"type": self.type, "text": self.text}
+    
+    def to_litellm_format(self, role: str = "user") -> Dict[str, Any]:
+        """Convert to LiteLLM/OpenAI Response API compatible format.
+        
+        Args:
+            role: The role context ("user" or "assistant") to determine the correct type
+        
+        Returns dict in format: 
+            - {"type": "input_text", "text": "..."} for user messages
+            - {"type": "output_text", "text": "..."} for assistant messages
+        """
+        text_type = "input_text" if role == "user" else "output_text"
+        return {"type": text_type, "text": self.text}
     
     def __add__(self, other) -> 'TextContent':
         """Concatenate text content with strings or other TextContent objects.
@@ -597,6 +723,10 @@ class ImageContent(ContentBlock):
         return not self.image_url and not self.image_data and not self.image_bytes
 
     def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization (not LiteLLM format).
+        
+        For LiteLLM format, use to_litellm_format() instead.
+        """
         result = {
             "type": self.type,
             "media_type": self.media_type
@@ -607,6 +737,41 @@ class ImageContent(ContentBlock):
             result["image_data"] = self.image_data
         if self.image_bytes:
             result["image_bytes"] = self.image_bytes
+        if self.detail:
+            result["detail"] = self.detail
+        return result
+    
+    def to_litellm_format(self) -> Dict[str, Any]:
+        """Convert to LiteLLM Response API compatible format.
+        
+        Returns dict in format:
+        {"type": "input_image", "image_url": {"url": "..."}}
+        """
+        # Determine the URL to use
+        if self.image_url:
+            url = self.image_url
+        elif self.image_data:
+            # Convert base64 data to data URL
+            url = f"data:{self.media_type};base64,{self.image_data}"
+        elif self.image_bytes:
+            # Convert bytes to base64 and then to data URL
+            import base64
+            b64_data = base64.b64encode(self.image_bytes).decode('utf-8')
+            url = f"data:{self.media_type};base64,{b64_data}"
+        else:
+            # Empty image
+            return {"type": "input_image", "image_url": ""}
+        
+        # Build the result in Response API format
+        result = {
+            "type": "input_image",
+            "image_url": url
+        }
+        
+        # Add detail if specified (OpenAI-specific)
+        if self.detail:
+            result["detail"] = self.detail
+            
         return result
 
     @classmethod
@@ -923,6 +1088,46 @@ class ImageContent(ContentBlock):
             if result.image_bytes:
                 self.image_bytes = result.image_bytes
             self.media_type = result.media_type
+
+    def as_image(self) -> Image.Image:
+        """Convert the image to a PIL Image.
+        
+        Fetches the image from URL if necessary (including HTTP/HTTPS URLs).
+        
+        Returns:
+            PIL Image object
+            
+        Raises:
+            ValueError: If no image data is available
+            requests.RequestException: If fetching from URL fails
+        """
+        # Try to get image bytes from any available source
+        image_bytes = self.get_bytes()
+        
+        if image_bytes:
+            return Image.open(io.BytesIO(image_bytes))
+        elif self.image_url:
+            if self.image_url.startswith(('http://', 'https://')):
+                # Fetch image from URL
+                try:
+                    import requests
+                    response = requests.get(self.image_url, timeout=30)
+                    response.raise_for_status()
+                    return Image.open(io.BytesIO(response.content))
+                except ImportError:
+                    # Fallback to urllib if requests is not available
+                    from urllib.request import urlopen
+                    with urlopen(self.image_url, timeout=30) as response:
+                        return Image.open(io.BytesIO(response.read()))
+            else:
+                # If it's a local file path
+                return Image.open(self.image_url)
+        else:
+            raise ValueError("No image data available to convert to PIL Image")
+
+    def show(self) -> Image.Image:
+        """A convenience alias for as_image()"""
+        return self.as_image()
     
     def get_bytes(self) -> Optional[bytes]:
         """Get raw image bytes.
@@ -1211,7 +1416,7 @@ class UserTurn:
     """Represents a user message turn in the conversation"""
     role: str = "user"
 
-    content: List[ContentBlock] = field(default_factory=list)
+    content: ContentBlockList = field(default_factory=ContentBlockList)
     tools: List[ToolDefinition] = field(default_factory=list)
 
     # Provider-specific settings
@@ -1222,6 +1427,57 @@ class UserTurn:
     # Metadata
     timestamp: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __init__(self, content=None, tools=None, **kwargs):
+        """
+        Initialize UserTurn with content and tools.
+        
+        Four ways to initialize:
+        1. Empty: UserTurn() - creates empty turn with defaults
+        2. Copy: UserTurn(existing_turn) - creates a copy of an existing UserTurn
+        3. Positional args: UserTurn(content, tools) - pass content and/or tools
+        4. Keyword args: UserTurn(content=..., tools=..., temperature=...) - explicit fields
+        
+        Args:
+            content: ContentBlockList, list of content blocks, UserTurn (for copying), or None
+            tools: List of ToolDefinition or None
+            **kwargs: Additional fields (temperature, max_tokens, top_p, timestamp, metadata)
+        """
+        self.output_contains_image = False
+
+        # Handle copy constructor: UserTurn(existing_turn)
+        if isinstance(content, UserTurn):
+            source = content
+            self.role = source.role
+            self.content = ContentBlockList(source.content)  # Deep copy the content list
+            self.tools = list(source.tools)  # Shallow copy the tools list
+            self.temperature = source.temperature
+            self.max_tokens = source.max_tokens
+            self.top_p = source.top_p
+            self.timestamp = source.timestamp
+            self.metadata = dict(source.metadata)  # Copy the metadata dict
+            return
+        
+        # Handle content
+        if content is None:
+            content = ContentBlockList()
+        elif not isinstance(content, ContentBlockList):
+            # If it's a list, wrap it in ContentBlockList
+            content = ContentBlockList(content) if isinstance(content, list) else ContentBlockList([content])
+        
+        # Handle tools
+        if tools is None:
+            tools = []
+        
+        # Set all fields
+        self.role = kwargs.get('role', "user")
+        self.content = content
+        self.tools = tools
+        self.temperature = kwargs.get('temperature', None)
+        self.max_tokens = kwargs.get('max_tokens', None)
+        self.top_p = kwargs.get('top_p', None)
+        self.timestamp = kwargs.get('timestamp', None)
+        self.metadata = kwargs.get('metadata', {})
 
     def add_text(self, text: str) -> 'UserTurn':
         """Add text content"""
@@ -1275,46 +1531,16 @@ class UserTurn:
             "metadata": self.metadata
         }
 
-    def to_litellm_format(self) -> Dict[str, Any]:
-        """Convert to LiteLLM format (OpenAI-compatible, works with all providers)"""
-        content = []
-        for block in self.content:
-            # Skip empty content blocks
-            if block.is_empty():
-                continue
-            if isinstance(block, TextContent):
-                content.append({"type": "text", "text": block.text})
-            elif isinstance(block, ImageContent):
-                if block.image_url:
-                    img_dict = {"type": "image_url", "image_url": {"url": block.image_url}}
-                    if block.detail:
-                        img_dict["image_url"]["detail"] = block.detail
-                    content.append(img_dict)
-                else:
-                    data_url = f"data:{block.media_type};base64,{block.image_data}"
-                    content.append({"type": "image_url", "image_url": {"url": data_url}})
-            elif isinstance(block, PDFContent):
-                # LiteLLM supports PDFs for providers like Claude
-                # Use image_url type with PDF data URL for compatibility
-                if block.pdf_url:
-                    warnings.warn("PDF URLs may not be supported by all providers through LiteLLM")
-                    content.append({"type": "text", "text": f"[PDF: {block.pdf_url}]"})
-                else:
-                    # Encode as data URL for providers that support PDFs
-                    data_url = f"data:application/pdf;base64,{block.pdf_data}"
-                    content.append({"type": "image_url", "image_url": {"url": data_url}})
-            elif isinstance(block, FileContent):
-                # For file content, add as text or data URL based on type
-                if block.is_binary:
-                    data_url = f"data:{block.mime_type};base64,{block.file_data}"
-                    content.append({"type": "text", "text": f"[File: {block.filename}]\n{data_url}"})
-                else:
-                    content.append({"type": "text", "text": f"[File: {block.filename}]\n{block.file_data}"})
+    def enable_image_generation(self):
+        self.output_contains_image = True
 
+    def to_litellm_format(self) -> Dict[str, Any]:
+        """Convert to LiteLLM Response API format (OpenAI Response API compatible)"""
         return {
             "role": "user",
-            "content": content
+            "content": self.content.to_litellm_format(role="user")
         }
+
 
 @dataclass
 class Turn:
@@ -1327,7 +1553,7 @@ class Turn:
 class AssistantTurn(Turn):
     """Represents an assistant message turn in the conversation"""
     role: str = "assistant"
-    content: List[ContentBlock] = field(default_factory=list)
+    content: ContentBlockList = field(default_factory=ContentBlockList)
 
     # Tool usage (Option B: Everything in AssistantTurn)
     tool_calls: List[ToolCall] = field(default_factory=list)
@@ -1355,6 +1581,24 @@ class AssistantTurn(Turn):
         2. From raw response: AssistantTurn(response) - autocasts the response
         3. With fields: AssistantTurn(role="assistant", content=[...]) - explicit fields
         """
+        if len(args) == 1 and isinstance(args[0], AssistantTurn):
+            # Case: Copy constructor - create a copy of another AssistantTurn
+            other = args[0]
+            super().__init__(
+                role=other.role,
+                content=ContentBlockList(other.content),
+                tool_calls=list(other.tool_calls),
+                tool_results=list(other.tool_results),
+                reasoning=other.reasoning,
+                finish_reason=other.finish_reason,
+                prompt_tokens=other.prompt_tokens,
+                completion_tokens=other.completion_tokens,
+                model=other.model,
+                timestamp=other.timestamp,
+                metadata=dict(other.metadata)
+            )
+            return
+
         if len(args) > 0 and len(kwargs) == 0:
             # Case 2: Single positional arg - autocast from raw response
             value_dict = self.autocast(args[0])
@@ -1366,7 +1610,7 @@ class AssistantTurn(Turn):
             # Case 1: No arguments - initialize with defaults
             super().__init__(
                 role="assistant",
-                content=[],
+                content=ContentBlockList(),
                 tool_calls=[],
                 tool_results=[],
                 reasoning=None,
@@ -1393,7 +1637,7 @@ class AssistantTurn(Turn):
         # Initialize the result dictionary with default values
         result = {
             "role": "assistant",
-            "content": [],
+            "content": ContentBlockList(),
             "tool_calls": [],
             "tool_results": [],
             "reasoning": None,
@@ -1554,7 +1798,7 @@ class AssistantTurn(Turn):
         # Initialize the result dictionary with default values
         result = {
             "role": "assistant",
-            "content": [],
+            "content": ContentBlockList(),
             "tool_calls": [],
             "tool_results": [],
             "reasoning": None,
@@ -1741,7 +1985,7 @@ class AssistantTurn(Turn):
         else:
             return {
                 "role": "assistant",
-                "content": [],
+                "content": ContentBlockList(),
                 "tool_calls": [],
                 "tool_results": [],
                 "reasoning": None,
@@ -1755,7 +1999,7 @@ class AssistantTurn(Turn):
 
     def add_text(self, text: str) -> 'AssistantTurn':
         """Add text content"""
-        self.content.append(TextContent(text=text))
+        self.content.append(text)
         return self
 
     def add_image(self, url: Optional[str] = None, data: Optional[str] = None,
@@ -1778,12 +2022,9 @@ class AssistantTurn(Turn):
         self.tool_results.append(result)
         return self
 
-    def get_text(self) -> str:
-        """Get all text content concatenated"""
-        return " ".join(
-            block.text for block in self.content
-            if isinstance(block, TextContent)
-        )
+    def to_text(self) -> str:
+        """Get all text content concatenated. Images will be presented as placeholder text."""
+        return self.content.to_text()
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format"""
@@ -1800,15 +2041,36 @@ class AssistantTurn(Turn):
             "metadata": self.metadata
         }
 
+    def get_text(self) -> ContentBlockList:
+        """Get all text content blocks.
+        
+        Returns:
+            ContentBlockList: List containing only TextContent blocks
+        """
+        text_blocks = ContentBlockList()
+        for block in self.content:
+            if isinstance(block, TextContent):
+                text_blocks.append(block)
+        return text_blocks
+    
+    def get_images(self) -> ContentBlockList:
+        """Get all image content blocks.
+        
+        Returns:
+            ContentBlockList: List containing only ImageContent blocks
+        """
+        image_blocks = ContentBlockList()
+        for block in self.content:
+            if isinstance(block, ImageContent):
+                image_blocks.append(block)
+        return image_blocks
+
     def to_litellm_format(self) -> Dict[str, Any]:
-        """Convert to LiteLLM format (OpenAI-compatible, works with all providers)"""
+        """Convert to LiteLLM Response API format (OpenAI Response API compatible)"""
         result = {"role": self.role}
 
-        if self.content:
-            # For multimodal or simple text response
-            text = self.get_text()
-            if text:
-                result["content"] = text
+        # Handle content blocks (text, images, etc.) - delegate to ContentBlockList
+        result["content"] = self.content.to_litellm_format(role=self.role)
 
         if self.tool_calls:
             result["tool_calls"] = [
@@ -1945,19 +2207,17 @@ class ConversationHistory:
         self,
         n: int = -1,
         truncate_strategy: Literal["from_start", "from_end"] = "from_start",
-        protected_rounds: Optional[int] = None
+        protected_rounds: Optional[int] = None,
+        model_name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Smart message format conversion that auto-detects the appropriate format.
         
         This method automatically chooses between Gemini format and LiteLLM format based on
-        the model name found in the most recent AssistantTurn. If a Gemini model is detected,
-        it uses to_gemini_format(), otherwise it uses to_litellm_format().
-        
-        Model detection:
-        - If any AssistantTurn has a model name containing "gemini" (case-insensitive),
-          uses Gemini format
-        - Otherwise, uses LiteLLM format (default)
+        the model name. Detection priority:
+        1. If model_name argument is provided and contains "gemini", uses Gemini format
+        2. Otherwise, checks if any AssistantTurn has a model name containing "gemini"
+        3. If no Gemini model detected, uses LiteLLM format (default)
         
         Note: This detection may not work for custom LLM backends with Gemini model names.
         In such cases, call to_gemini_format() or to_litellm_format() explicitly.
@@ -1971,6 +2231,8 @@ class ConversationHistory:
                 - "from_end": Remove newest rounds, keep the oldest n rounds
             protected_rounds: Number of initial rounds to never truncate (task definition).
                 If None, uses self.protected_rounds. Counts towards n.
+            model_name: Optional model name to use for format detection. If provided and
+                contains "gemini" (case-insensitive), forces Gemini format.
         
         Returns:
             List of message dictionaries in the appropriate format
@@ -1981,20 +2243,24 @@ class ConversationHistory:
             history.system_prompt = "You are helpful."
             history.add_user_turn(UserTurn().add_text("Hello"))
             
-            # If you used a Gemini model, this will auto-detect and use Gemini format
-            messages = history.to_messages()
+            # Force Gemini format by providing model name
+            messages = history.to_messages(model_name="gemini-2.5-flash")
             
             # Or be explicit:
             messages = history.to_gemini_format()  # Force Gemini format
             messages = history.to_litellm_format()  # Force LiteLLM format
         """
-        # Check if any AssistantTurn has a Gemini model
+        # Check if model_name argument indicates Gemini (highest priority)
         use_gemini_format = False
-        for turn in self.turns:
-            if isinstance(turn, AssistantTurn) and turn.model:
-                if 'gemini' in turn.model.lower():
-                    use_gemini_format = True
-                    break
+        if model_name and 'gemini' in model_name.lower():
+            use_gemini_format = True
+        else:
+            # Check if any AssistantTurn has a Gemini model
+            for turn in self.turns:
+                if isinstance(turn, AssistantTurn) and turn.model:
+                    if 'gemini' in turn.model.lower():
+                        use_gemini_format = True
+                        break
         
         # Use the appropriate format
         if use_gemini_format:
@@ -2094,9 +2360,9 @@ class ConversationHistory:
                 for block in content:
                     if block.get('type') == 'text':
                         parts.append({'text': block.get('text', '')})
-                    elif block.get('type') == 'image_url':
+                    elif block.get('type') == 'image':
                         # Handle image URLs
-                        image_url = block.get('image_url', {}).get('url', '')
+                        image_url = block.get('image_url', '')
                         if image_url.startswith('data:'):
                             # Extract base64 data
                             import re

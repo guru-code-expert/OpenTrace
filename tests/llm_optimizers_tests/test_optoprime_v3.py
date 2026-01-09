@@ -15,7 +15,7 @@ from opto.utils.backbone import TextContent, ImageContent
 # Skip tests if no API credentials are available
 SKIP_REASON = "No API credentials found"
 HAS_CREDENTIALS = os.path.exists("OAI_CONFIG_LIST") or os.environ.get("TRACE_LITELLM_MODEL") or os.environ.get(
-    "OPENAI_API_KEY")
+    "OPENAI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 llm = LLM()
 
 
@@ -503,3 +503,7 @@ def test_optimizer_step_with_content_blocks():
     # Verify the step completed
     assert optimizer.log is not None
     assert len(optimizer.log) > 0
+
+@pytest.mark.skipif(not HAS_CREDENTIALS, reason=SKIP_REASON)
+def test_optimizer_multimodal_parameter_update():
+    pass

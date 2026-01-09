@@ -391,6 +391,15 @@ def is_image(data) -> bool:
         except (ValueError, AttributeError):
             pass
 
+    # Check if it's a specialized container class
+    # We don't use isinstance check because we can't import other files into nodes.py, this file should have no
+    # external dependencies on other files.
+    try:
+        if 'ImageContent' in data.__class__.__name__:
+            return True
+    except AttributeError:
+        pass
+
     return False
 
 class AbstractNode(Generic[T]):
@@ -484,6 +493,7 @@ class AbstractNode(Generic[T]):
             2. PIL Image object
             3. Raw image bytes
             4. URL string pointing to an image (pattern-based check, no network request)
+            5. An ImageContent (customized data container)
 
             For URLs, this performs a fast pattern-based check only. For verification
             with a network request, use verify_image_url() method.

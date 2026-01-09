@@ -4,6 +4,7 @@ Key difference to v2:
 2. Support multimodal node (both trainable and non-trainable)
 """
 
+import re
 import json
 from typing import List, Union, Tuple, Optional
 from dataclasses import dataclass
@@ -75,6 +76,9 @@ class OptimizerPromptSymbolSet:
     reasoning_tag = "reasoning"
     improved_variable_tag = "variable"
     name_tag = "name"
+
+    # only used by JSON format
+    suggestion_tag = "suggestion"
 
     expect_json = False  # this will stop `enforce_json` arguments passed to LLM calls
 
@@ -168,7 +172,9 @@ class OptimizerPromptSymbolSet:
             "instruction": self.instruction_section_title,
             "code": self.code_section_title,
             "documentation": self.documentation_section_title,
-            "context": self.context_section_title
+            "context": self.context_section_title,
+            "reasoning": self.reasoning_tag,
+            "suggestion": self.suggestion_tag
         }
 
 
@@ -178,13 +184,13 @@ class OptimizerPromptSymbolSetJSON(OptimizerPromptSymbolSet):
     expect_json = True
 
     custom_output_format_instruction = dedent("""
-    {{
+    {
         "reasoning": <Your reasoning>,
-        "suggestion": {{
+        "suggestion": {
             <variable_1>: <suggested_value_1>,
             <variable_2>: <suggested_value_2>,
-        }}
-    }}
+        }
+    }
     """)
 
     def example_output(self, reasoning, variables):
@@ -205,8 +211,62 @@ class OptimizerPromptSymbolSetJSON(OptimizerPromptSymbolSet):
         Extracts reasoning and suggestion variables from the LLM response using OptoPrime's extraction logic.
         """
         # Use the centralized extraction logic from OptoPrime
-        optoprime_instance = OptoPrime()
-        return optoprime_instance.extract_llm_suggestion(response)
+        suggestion_tag = self.default_prompt_symbols.get("suggestion", "suggestion")
+        reasoning_tag = self.default_prompt_symbols.get("reasoning", "reasoning")
+
+        ignore_extraction_error = True
+
+        reasoning = "(Unable to extract, possibly due to parsing failure)"
+
+        if "```" in response:
+            match = re.findall(r"```(.*?)```", response, re.DOTALL)
+            if len(match) > 0:
+                response = match[0]
+
+        json_extracted = {}
+        suggestion = {}
+        attempt_n = 0
+        while attempt_n < 2:
+            try:
+                json_extracted = json.loads(response)
+                if isinstance(json_extracted, dict):  # trim all whitespace keys in the json_extracted
+                    json_extracted = {k.strip(): v for k, v in json_extracted.items()}
+                suggestion = json_extracted.get(suggestion_tag, json_extracted)
+                reasoning = json_extracted.get(reasoning_tag, "")
+                break
+            except json.JSONDecodeError:
+                response = re.findall(r"{.*}", response, re.DOTALL)
+                if len(response) > 0:
+                    response = response[0]
+                attempt_n += 1
+            except Exception:
+                attempt_n += 1
+
+        if not isinstance(suggestion, dict):
+            suggestion = json_extracted if isinstance(json_extracted, dict) else {}
+
+        if len(suggestion) == 0:
+            pattern = rf'"{suggestion_tag}"\s*:\s*\{{(.*?)\}}'
+            suggestion_match = re.search(pattern, str(response), re.DOTALL)
+            if suggestion_match:
+                suggestion = {}
+                suggestion_content = suggestion_match.group(1)
+                pair_pattern = r'"([a-zA-Z0-9_]+)"\s*:\s*"(.*)"'
+                pairs = re.findall(pair_pattern, suggestion_content, re.DOTALL)
+                for key, value in pairs:
+                    suggestion[key] = value
+
+        if len(suggestion) == 0 and not ignore_extraction_error:
+            print(f"Cannot extract {suggestion_tag} from LLM's response:\n{response}")
+
+        keys_to_remove = []
+        for key, value in suggestion.items():
+            if "__code" in key and value.strip() == "":
+                keys_to_remove.append(key)
+        for key in keys_to_remove:
+            del suggestion[key]
+
+        return {"reasoning": reasoning, "variables": suggestion}
 
 
 class OptimizerPromptSymbolSet2(OptimizerPromptSymbolSet):
@@ -290,6 +350,7 @@ class ProblemInstance:
     others: ContentBlockList
     outputs: ContentBlockList
     feedback: ContentBlockList  # May contain images mixed with text
+    context: Optional[ContentBlockList]
 
     optimizer_prompt_symbol_set: OptimizerPromptSymbolSet
 
@@ -382,13 +443,14 @@ class ProblemInstance:
         blocks.append("\n\n# Outputs\n")
         blocks.extend(self.outputs)
 
+        # Context section (optional)
+        if self.context is not None and self.context.to_text().strip() != "":
+            blocks.append(f"\n\n# Context\n") # section name
+            blocks.extend(self.context) # extend the blocks
+
         # Feedback section (may contain images)
         blocks.append("\n\n# Feedback\n")
         blocks.extend(self.feedback)
-
-        # Context section (optional)
-        if self.context is not None and self.context.strip() != "":
-            blocks.append(f"\n\n# Context\n{self.context}")
 
         return blocks
 
@@ -566,11 +628,6 @@ class Content(ContentBlockList):
                     )
                 self.append(image_content)
     
-    def ensure(self, *args, **kwargs) -> 'Content':
-        """Ensure the value is a Content object."""
-        if len(args) == 1 and isinstance(args[0], Content):
-            return args[0]
-        return Content(args, **kwargs)
 
 # we provide two aliases for the Content class for semantic convenience
 Context = Content
@@ -590,6 +647,7 @@ class OptoPrimeV3(OptoPrime):
         - {others_section_title}: the intermediate values created through the code execution.
         - {outputs_section_title}: the result of the code output.
         - {feedback_section_title}: the feedback about the code's execution result.
+        - {context_section_title}: the context information that might be useful to solve the problem.
 
         In `{variables_section_title}`, `{inputs_section_title}`, `{outputs_section_title}`, and `{others_section_title}`, the format is:
 
@@ -604,11 +662,9 @@ class OptoPrimeV3(OptoPrime):
 
     output_format_prompt_template = dedent(
         """
-        Output_format: Your output should be in the following XML/HTML format:
+        Output_format: Your output should be in the following XML or JSON format:
 
-        ```
         {output_format}
-        ```
 
         In <{reasoning_tag}>, explain the problem: 1. what the {instruction_section_title} means 2. what the {feedback_section_title} on {outputs_section_title} means to {variables_section_title} considering how {variables_section_title} are used in {code_section_title} and other values in {documentation_section_title}, {inputs_section_title}, {others_section_title}. 3. Reasoning about the suggested changes in {variables_section_title} (if needed) and the expected result.
 
@@ -628,16 +684,6 @@ class OptoPrimeV3(OptoPrime):
 
         Your response:
         {example_response}
-        """
-    ))
-
-    user_prompt_context_template = PromptTemplate(dedent(
-        """
-        Now you see a new problem instance. Here is some context for this problem:
-        
-        ================================
-        {context}
-        ================================
         """
     ))
 
@@ -665,6 +711,7 @@ class OptoPrimeV3(OptoPrime):
             parameters: List[ParameterNode],
             llm: AbstractModel = None,
             *args,
+            image_llm: AbstractModel = None,
             propagator: Propagator = None,
             objective: Union[None, str] = None,
             ignore_extraction_error: bool = True,
@@ -677,17 +724,22 @@ class OptoPrimeV3(OptoPrime):
             optimizer_prompt_symbol_set: OptimizerPromptSymbolSet = OptimizerPromptSymbolSet(),
             use_json_object_format=True,  # whether to use json object format for the response when calling LLM
             truncate_expression=truncate_expression,
-            problem_context: Optional[Content] = None,
+            problem_context: Optional[ContentBlockList] = None,
             **kwargs,
     ):
         super().__init__(parameters, *args, propagator=propagator, **kwargs)
 
         self.truncate_expression = truncate_expression
-        self.problem_context: Optional[Content] = problem_context
+        self.problem_context: Optional[ContentBlockList] = problem_context
+        self.output_contains_image = False
 
         self.use_json_object_format = use_json_object_format if optimizer_prompt_symbol_set.expect_json and use_json_object_format else False
         self.ignore_extraction_error = ignore_extraction_error
-        self.llm = llm or LLM()
+        self.llm = llm or LLM(mm_beta=True)
+        self.image_llm = image_llm
+
+        assert self.llm.mm_beta, "OptoPrimeV3 enables multi-modal LLM backbone by default. Please use LLM(model='...', mm_beta=True)."
+
         self.objective = objective or self.default_objective.format(value_tag=optimizer_prompt_symbol_set.value_tag,
                                                                     variables_section_title=optimizer_prompt_symbol_set.variables_section_title,
                                                                     feedback_section_title=optimizer_prompt_symbol_set.feedback_section_title)
@@ -752,6 +804,8 @@ class OptoPrimeV3(OptoPrime):
                 f"OptoPrimeV3 supports at most one image parameter, but found {len(image_params)}: "
                 f"{param_names}. LLMs can only generate one image at a time."
             )
+        if len(image_params)  == 1:
+            self.output_contains_image = True
 
     def add_context(self, *args, images: Optional[List[Any]] = None, format: str = "PNG"):
         """Add context to the optimizer, supporting both text and images.
@@ -830,6 +884,7 @@ class OptoPrimeV3(OptoPrime):
             code_section_title=self.optimizer_prompt_symbol_set.code_section_title.replace(" ", ""),
             documentation_section_title=self.optimizer_prompt_symbol_set.documentation_section_title.replace(" ", ""),
             others_section_title=self.optimizer_prompt_symbol_set.others_section_title.replace(" ", ""),
+            context_section_title=self.optimizer_prompt_symbol_set.context_section_title.replace(" ", "")
         )
         self.output_format_prompt = self.output_format_prompt_template.format(
             output_format=self.optimizer_prompt_symbol_set.output_format,
@@ -1090,12 +1145,8 @@ class OptoPrimeV3(OptoPrime):
             )
             user_content_blocks.append(example_text)
 
-        # Add context here
-        user_content_blocks.append(self.user_prompt_context_template.format(
-            user_prompt_context=self.problem_context,
-        ))
-
         # Add problem instance template
+        # context is part of the problem instance
         user_content_blocks.append(self.user_prompt_template.format(
             problem_instance=problem_inst.to_content_blocks(),
         ))
@@ -1131,6 +1182,13 @@ class OptoPrimeV3(OptoPrime):
             if self.optimizer_prompt_symbol_set.variables_section_title not in mask
             else ContentBlockList()
         )
+
+        # we add a temporary check here to ensure no more than 1 parameter is an image
+        variable_stats = variables_content.count_blocks()
+        if 'ImageContent' in variable_stats:
+            assert variable_stats['ImageContent'] <= 1, "Currently we do not support generating multiple images (more than 1 parameter is an image)"
+            self.output_contains_image = True
+
         inputs_content = (
             self.repr_node_value_compact_as_content_blocks(
                 summary.inputs,
@@ -1178,8 +1236,8 @@ class OptoPrimeV3(OptoPrime):
             inputs=inputs_content,
             outputs=outputs_content,
             others=others_content,
-            feedback=Content.ensure(
-                summary.user_feedback) if self.optimizer_prompt_symbol_set.feedback_section_title not in mask else Content(""),
+            feedback=Content(summary.user_feedback) if self.optimizer_prompt_symbol_set.feedback_section_title not in mask else Content(""),
+            context=self.problem_context,
             optimizer_prompt_symbol_set=self.optimizer_prompt_symbol_set
         )
 
@@ -1198,21 +1256,29 @@ class OptoPrimeV3(OptoPrime):
         assert isinstance(self.propagator, GraphPropagator)
         summary = self.summarize()
 
-        system_prompt, user_prompt = self.construct_prompt(summary, mask=mask)
+        system_prompt, user_content_blocks = self.construct_prompt(summary, mask=mask)
 
         response = self.call_llm(
             system_prompt=system_prompt,
-            user_prompt=user_prompt,
+            user_prompt=user_content_blocks,
             verbose=verbose,
             max_tokens=self.max_tokens,
         )
 
-        if "TERMINATE" in response:
+        if "TERMINATE" in response.to_text():
             return {}
 
-        suggestion = self.extract_llm_suggestion(response)
+        suggestion = self.extract_llm_suggestion(response.to_text())
         update_dict = self.construct_update_dict(suggestion['variables'])
         # suggestion has two keys: reasoning, and variables
+
+        # for update_dict, we manually update the image according to the variable name
+        if response.get_images().has_images():
+            images = response.get_images()
+            assert len(images) == 1, "Currently we only allow at most one image parameter"
+            # find the variable name
+            image_param = [param for param in self.parameters if param.is_image][0]
+            update_dict[image_param] = images[0].as_image() # parameter as PIL Image
 
         if self.log is not None:
             # For logging, use text representation
@@ -1248,7 +1314,7 @@ class OptoPrimeV3(OptoPrime):
             user_prompt: ContentBlockList,
             verbose: Union[bool, str] = False,
             max_tokens: int = 4096,
-    ):
+    ) -> AssistantTurn:
         """Call the LLM with a prompt and return the response.
         
         Args:
@@ -1258,7 +1324,7 @@ class OptoPrimeV3(OptoPrime):
             max_tokens: Maximum tokens in the response.
         
         Returns:
-            The LLM response content as a string.
+            assistant_turn: AssistantTurn object
         """
         if verbose not in (False, "output"):
             # Print text portions, indicate if images present
@@ -1271,16 +1337,7 @@ class OptoPrimeV3(OptoPrime):
         self.conversation_history.system_prompt = system_prompt
 
         # Create user turn with content
-        user_turn = UserTurn()
-
-        # Add content blocks from user_prompt
-        for block in user_prompt:
-            if isinstance(block, TextContent):
-                user_turn.content.append(block)
-            elif isinstance(block, ImageContent):
-                user_turn.content.append(block)
-            # Handle other content types if needed
-
+        user_turn = UserTurn(user_prompt)
         self.conversation_history.add_user_turn(user_turn)
 
         # Get messages with conversation length control (truncate from start)
@@ -1288,23 +1345,27 @@ class OptoPrimeV3(OptoPrime):
         # The current user turn is automatically included by to_messages()
         messages = self.conversation_history.to_messages(
             n=self.conversation_length if self.conversation_length > 0 else -1,
-            truncate_strategy="from_start"
+            truncate_strategy="from_start",
+            model_name=self.llm.model_name
         )
 
         response_format = {"type": "json_object"} if self.use_json_object_format else None
 
-        response = self.llm(messages=messages, max_tokens=max_tokens, response_format=response_format)
-
-        response_content = response.choices[0].message.content
-
-        # Store assistant response in conversation history
-        assistant_turn = AssistantTurn()
-        assistant_turn.add_text(response_content)
-        self.conversation_history.add_assistant_turn(assistant_turn)
+        # Prepare common arguments
+        llm_kwargs = {"messages": messages, "max_tokens": max_tokens, "response_format": response_format}
+        
+        # Add image generation tool only for non-Gemini models when output contains image
+        if self.output_contains_image and 'gemini' not in self.llm.model_name:
+            llm_kwargs["tools"] = [{"type": "image_generation"}]
+        
+        assistant_turn = self.llm(**llm_kwargs)
 
         if verbose:
-            print("LLM response:\n", response_content)
-        return response_content
+            print("LLM response:\n", assistant_turn)
+
+        self.conversation_history.add_assistant_turn(assistant_turn)
+
+        return assistant_turn
 
     def save(self, path: str):
         """Save the optimizer state to a file."""

@@ -523,7 +523,7 @@ def test_real_llm_multi_turn_with_images_updated_assistant_turn():
     at = AssistantTurn(response1)
     
     print("\n🤖 Turn 1 - Assistant:")
-    print(f"  {at.get_text()[:200]}...")
+    print(f"  {at.to_text()[:200]}...")
     
     history.add_assistant_turn(at)
     
@@ -543,7 +543,7 @@ def test_real_llm_multi_turn_with_images_updated_assistant_turn():
     print(f"  {response2_content[:200]}...")
     
     # Verify responses
-    assert at.get_text() is not None and len(at.get_text()) > 20
+    assert at.to_text() is not None and len(at.to_text()) > 20
     assert response2_content is not None and len(response2_content) > 20
     
     # Turn 2 should reference the context from turn 1
@@ -585,7 +585,7 @@ def test_real_google_genai_multi_turn_with_images_updated():
     at = AssistantTurn(response1)
     
     print("\n🤖 Turn 1 - Assistant:")
-    print(f"  {at.get_text()[:200] if at.get_text() else '[Image generated]'}...")
+    print(f"  {at.to_text()[:200] if at.to_text() else '[Image generated]'}...")
     
     history.add_assistant_turn(at)
     
@@ -600,7 +600,7 @@ def test_real_google_genai_multi_turn_with_images_updated():
     
     response2 = llm(messages=messages, max_tokens=300)
     at2 = AssistantTurn(response2)
-    response2_content = at2.get_text()
+    response2_content = at2.to_text()
     
     print("\n🤖 Turn 2 - Assistant:")
     print(f"  {response2_content[:200]}...")

@@ -353,7 +353,7 @@ class TestSystemMessages:
         assert response.content is not None, "Content should not be None"
         
         # Get text content
-        text_content = response.get_text()
+        text_content = response.to_text()
         assert isinstance(text_content, str), "Text content should be a string"
         assert len(text_content) > 0, "Text content should not be empty"
         assert '4' in text_content, f"Response should contain the answer '4'. Got: {text_content}"
@@ -400,7 +400,7 @@ class TestSystemMessages:
         assert response.content is not None, "Content should not be None"
         
         # Get text content
-        text_content = response.get_text()
+        text_content = response.to_text()
         assert isinstance(text_content, str), "Text content should be a string"
         assert len(text_content) > 0, "Text content should not be empty"
         
@@ -423,7 +423,7 @@ class TestSystemMessages:
         
         response1 = llm(messages=messages)
         assert isinstance(response1, AssistantTurn), "First response should be AssistantTurn"
-        text1 = response1.get_text()
+        text1 = response1.to_text()
         
         # Check pirate-like language in first response
         pirate_indicators = ['arr', 'matey', 'ahoy', 'ye', 'aye']
@@ -436,7 +436,7 @@ class TestSystemMessages:
         
         response2 = llm(messages=messages)
         assert isinstance(response2, AssistantTurn), "Second response should be AssistantTurn"
-        text2 = response2.get_text()
+        text2 = response2.to_text()
         
         # Check pirate-like language persists
         has_pirate_language_2 = any(indicator in text2.lower() for indicator in pirate_indicators)
@@ -461,7 +461,7 @@ class TestSystemMessages:
         )
         
         assert isinstance(response, AssistantTurn), "Should return AssistantTurn object"
-        text_content = response.get_text()
+        text_content = response.to_text()
         assert len(text_content) > 0, "Should have content"
         
         print_color(f"✓ Gemini system_instruction works with other config parameters", 'green')

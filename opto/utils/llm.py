@@ -26,6 +26,25 @@ try:
 except ImportError:
     pass
 
+
+def _is_image_generation_model(model_name: str) -> bool:
+    """Detect if a model is for image generation based on its name.
+    
+    Detects:
+    - OpenAI: gpt-image-1, gpt-image-1.5, gpt-image-1-mini, dall-e-2, dall-e-3
+    - Gemini: gemini-2.5-flash-image, gemini-2.5-pro-image, etc.
+    
+    Args:
+        model_name: The name of the model to check
+        
+    Returns:
+        bool: True if the model is an image generation model, False otherwise
+    """
+    if model_name is None:
+        return False
+    model_lower = model_name.lower()
+    return 'image' in model_lower or 'dall-e' in model_lower
+
 class AbstractModel:
     """Abstract base class for LLM model wrappers with automatic refreshing.
 
@@ -42,6 +61,9 @@ class AbstractModel:
     mm_beta : bool, optional
         If True, returns AssistantTurn objects with rich multimodal content.
         If False (default), returns raw API responses in legacy format.
+    model_name : str or None, optional
+        The name of the model being used (e.g., "gpt-4o", "claude-3-5-sonnet-latest").
+        If None, no model name is stored.
 
     Attributes
     ----------
@@ -51,6 +73,10 @@ class AbstractModel:
         Refresh frequency in seconds.
     mm_beta : bool
         Whether to use multimodal beta mode.
+    model_name : str or None
+        The name of the model being used.
+    is_image_model : bool
+        Whether the model is for image generation (auto-detected from model name).
 
     model : Any
         Property that returns the current model instance.
@@ -80,7 +106,7 @@ class AbstractModel:
     """
 
     def __init__(self, factory: Callable, reset_freq: Union[int, None] = None, 
-                 mm_beta: bool = False) -> None:
+                 mm_beta: bool = False, model_name: Union[str, None] = None) -> None:
         """
         Args:
             factory: A function that takes no arguments and returns a model that is callable.
@@ -88,18 +114,29 @@ class AbstractModel:
                 refreshed. If None, the model is never refreshed.
             mm_beta: If True, returns AssistantTurn objects with rich multimodal content.
                 If False (default), returns raw API responses in legacy format.
+            model_name: The name of the model being used (e.g., "gpt-4o", "claude-3-5-sonnet-latest").
+                If None, no model name is stored.
         """
         self.factory = factory
         self._model = self.factory()
         self.reset_freq = reset_freq
         self._init_time = time.time()
         self.mm_beta = mm_beta
+        self.model_name = model_name
 
     # Overwrite this `model` property when subclassing.
     @property
     def model(self):
         """When self.model is called, text responses should always be available at `response['choices'][0]['message']['content']`"""
         return self._model
+    
+    @property
+    def is_image_model(self) -> bool:
+        """Check if this model is for image generation based on model name.
+        
+        Returns True if the model name contains 'image' or 'dall-e', False otherwise.
+        """
+        return _is_image_generation_model(self.model_name)
 
     # This is the main API
     def __call__(self, *args, **kwargs) -> Any:
@@ -202,8 +239,11 @@ class AutoGenLLM(AbstractModel):
         if filter_dict is not None:
             config_list = autogen.filter_config(config_list, filter_dict)
 
+        # Extract model name from config_list if available
+        model_name = config_list[0].get('model') if config_list and len(config_list) > 0 else None
+
         factory = lambda *args, **kwargs: self._factory(config_list)
-        super().__init__(factory, reset_freq, mm_beta=mm_beta)
+        super().__init__(factory, reset_freq, mm_beta=mm_beta, model_name=model_name)
 
     @classmethod
     def _factory(cls, config_list):
@@ -283,6 +323,7 @@ class LiteLLM(AbstractModel):
 
     https://docs.litellm.ai/docs/completion/input
     https://docs.litellm.ai/docs/response_api
+    https://docs.litellm.ai/docs/image_generation
 
     To use this, set the credentials through the environment variable as
     instructed in the LiteLLM documentation. For convenience, you can set the
@@ -293,11 +334,23 @@ class LiteLLM(AbstractModel):
     This class now supports storing default completion parameters (like temperature,
     top_p, max_tokens, etc.) that will be used for all calls unless overridden.
     
-    Responses API Support:
+    Text Generation:
         When mm_beta=True, the Responses API is used for rich multimodal content.
         When mm_beta=False (default), the Completion API is used for backward compatibility.
         
         See: https://docs.litellm.ai/docs/response_api
+    
+    Image Generation:
+        Automatically detects image generation models (containing 'image' or 'dall-e' in name).
+        Uses litellm.image_generation() API for models like:
+        - gpt-image-1, gpt-image-1.5, gpt-image-1-mini
+        - dall-e-2, dall-e-3
+        
+        Image models require a single string prompt:
+            llm = LLM(model="gpt-image-1.5")
+            result = llm(prompt="A serene mountain landscape")
+        
+        Check llm.is_image_model to determine if a model is for image generation.
     """
 
     def __init__(self, model: Union[str, None] = None, reset_freq: Union[int, None] = None,
@@ -312,7 +365,7 @@ class LiteLLM(AbstractModel):
         self.model_name = model
         self.cache = cache
         self.default_params = default_params  # Store default completion parameters
-        
+
         factory = lambda: self._factory(
             self.model_name, 
             self.default_params, 
@@ -320,12 +373,35 @@ class LiteLLM(AbstractModel):
             max_retries=max_retries, 
             base_delay=base_delay
         )
-        super().__init__(factory, reset_freq, mm_beta=mm_beta)
+        super().__init__(factory, reset_freq, mm_beta=mm_beta, model_name=model)
 
     @classmethod
     def _factory(cls, model_name: str, default_params: dict, mm_beta: bool,
                  max_retries=10, base_delay=1.0):
         import litellm
+        
+        # Check if this is an image generation model
+        is_image_model = _is_image_generation_model(model_name)
+        
+        if is_image_model:
+            # Image generation API
+            api_func = litellm.image_generation
+            operation_name = "LiteLLM_image_generation"
+            
+            # Standard image generation wrapper
+            def image_wrapper(prompt, **kwargs):
+                assert isinstance(prompt, str), (
+                    f"Image generation requires a single string prompt. "
+                    f"Got {type(prompt).__name__}. "
+                    f"Usage: llm(prompt='your prompt here')"
+                )
+                return retry_with_exponential_backoff(
+                    lambda: api_func(model=model_name, prompt=prompt, **{**default_params, **kwargs}),
+                    max_retries=max_retries,
+                    base_delay=base_delay,
+                    operation_name=operation_name
+                )
+            return image_wrapper
         
         # Use Responses API when mm_beta=True, otherwise use Completion API
         api_func = litellm.responses if mm_beta else litellm.completion
@@ -420,7 +496,7 @@ class CustomLLM(AbstractModel):
         self.model_name = model
         self.cache = cache
         factory = lambda: self._factory(base_url, server_api_key)  # an LLM instance uses a fixed model
-        super().__init__(factory, reset_freq, mm_beta=mm_beta)
+        super().__init__(factory, reset_freq, mm_beta=mm_beta, model_name=model)
 
     @classmethod
     def _factory(cls, base_url: str, server_api_key: str):
@@ -442,6 +518,7 @@ class GoogleGenAILLM(AbstractModel):
     This is an LLM backend using Google's GenAI SDK with the Interactions API.
     
     https://ai.google.dev/gemini-api/docs/text-generation
+    https://ai.google.dev/gemini-api/docs/image-generation
     
     The Interactions API is a unified interface for interacting with Gemini models,
     similar to OpenAI's Response API. It provides better state management, tool
@@ -452,34 +529,45 @@ class GoogleGenAILLM(AbstractModel):
     variable TRACE_GOOGLE_GENAI_MODEL.
     
     Supported models:
-    - Gemini 3: gemini-3-flash-preview, gemini-3-pro-preview
-    - Gemini 2.5: gemini-2.5-flash, gemini-2.5-pro, gemini-2.5-flash-lite
+    - Text: gemini-2.5-flash, gemini-2.5-pro, gemini-2.5-flash-lite
+    - Image: gemini-2.5-flash-image, gemini-2.5-pro-image
     
     This class supports storing default generation parameters (like temperature,
     max_output_tokens, etc.) that will be used for all calls unless overridden.
     
-    Note: Use ConversationHistory.to_gemini_format() to convert conversation history
-    to the format expected by Google GenAI.
+    Text Generation:
+        Use ConversationHistory.to_gemini_format() to convert conversation history
+        to the format expected by Google GenAI.
+        
+        Example:
+            from opto.utils.llm import LLM
+            from opto.utils.backbone import ConversationHistory, UserTurn, AssistantTurn
+            
+            # Initialize LLM
+            llm = LLM(model="gemini-2.5-flash")
+            
+            # Create conversation history
+            history = ConversationHistory()
+            history.system_prompt = "You are a helpful assistant."
+            history.add_user_turn(UserTurn().add_text("What is AI?"))
+            
+            # Convert to Gemini format and call LLM
+            messages = history.to_gemini_format()
+            response = llm(messages=messages, max_tokens=100)
+            
+            # Parse response
+            at = AssistantTurn(response)
+            print(at.get_text())
     
-    Example:
-        from opto.utils.llm import LLM
-        from opto.utils.backbone import ConversationHistory, UserTurn, AssistantTurn
+    Image Generation:
+        Automatically detects image generation models (containing 'image' in name).
+        Uses client.models.generate_images() API for models like gemini-2.5-flash-image.
         
-        # Initialize LLM
-        llm = LLM(model="gemini-2.5-flash")
+        Image models require a single string prompt:
+            llm = LLM(model="gemini-2.5-flash-image")
+            result = llm(prompt="A serene mountain landscape", number_of_images=2)
         
-        # Create conversation history
-        history = ConversationHistory()
-        history.system_prompt = "You are a helpful assistant."
-        history.add_user_turn(UserTurn().add_text("What is AI?"))
-        
-        # Convert to Gemini format and call LLM
-        messages = history.to_gemini_format()
-        response = llm(messages=messages, max_tokens=100)
-        
-        # Parse response
-        at = AssistantTurn(response)
-        print(at.get_text())
+        Check llm.is_image_model to determine if a model is for image generation.
     """
 
     def __init__(self, model: Union[str, None] = None, reset_freq: Union[int, None] = None,
@@ -491,7 +579,7 @@ class GoogleGenAILLM(AbstractModel):
         self.cache = cache
         self.default_params = default_params  # Store default generation parameters
         factory = lambda: self._factory(self.model_name, self.default_params)
-        super().__init__(factory, reset_freq, mm_beta=mm_beta)
+        super().__init__(factory, reset_freq, mm_beta=mm_beta, model_name=model)
 
     @classmethod
     def _factory(cls, model_name: str, default_params: dict):
@@ -503,6 +591,39 @@ class GoogleGenAILLM(AbstractModel):
         else:
             # Try without API key (will use default credentials or fail gracefully)
             client = genai.Client()
+
+        # Check if this is an image generation model
+        is_image_model = _is_image_generation_model(model_name)
+        
+        if is_image_model:
+            # Image generation for Gemini
+            def image_api_func(prompt, **kwargs):
+                assert isinstance(prompt, str), (
+                    f"Image generation requires a single string prompt. "
+                    f"Got {type(prompt).__name__}. "
+                    f"Usage: llm(prompt='your prompt here')"
+                )
+                
+                # Gemini image generation API
+                # https://ai.google.dev/gemini-api/docs/image-generation
+                # Filter kwargs to only valid parameters for generate_images
+                valid_params = {
+                    k: v for k, v in kwargs.items() 
+                    if k in ['number_of_images', 'aspect_ratio', 'safety_filter_level']
+                }
+                response = client.models.generate_images(
+                    model=model_name,
+                    prompt=prompt,
+                    **valid_params
+                )
+                return response
+            
+            return lambda *args, **kwargs: retry_with_exponential_backoff(
+                lambda: image_api_func(*args, **{**default_params, **kwargs}),
+                max_retries=5,
+                base_delay=1,
+                operation_name=f"{model_name}_image_gen"
+            )
 
         # Build config if there are generation parameters
         config_params = {}
@@ -811,10 +932,11 @@ class DummyLLM(AbstractModel):
     def __init__(self,
                  callable,
                  reset_freq: Union[int, None] = None,
-                 mm_beta: bool = False) -> None:
+                 mm_beta: bool = False,
+                 model_name: Union[str, None] = None) -> None:
         # self.message = message
         self.callable = callable
-        super().__init__(self._factory, reset_freq, mm_beta=mm_beta)
+        super().__init__(self._factory, reset_freq, mm_beta=mm_beta, model_name=model_name)
 
     def _factory(self):
 
@@ -852,6 +974,30 @@ class LLM:
         # Add LiteLLM parameters
         llm = LLM(model="gpt-4o", temperature=0.7, max_tokens=2000)
         llm = LLM(model="gpt-4o-mini", temperature=0.3, top_p=0.9)
+    
+    Image Generation:
+        # OpenAI image models (auto-detected by 'image' or 'dall-e' in name)
+        img_llm = LLM(model="gpt-image-1.5")
+        print(img_llm.is_image_model)  # True
+        result = img_llm(prompt="A serene mountain landscape at sunset")
+        
+        # With additional parameters
+        img_llm = LLM(model="gpt-image-1", size="1024x1024", quality="hd")
+        result = img_llm(prompt="A futuristic cityscape")
+        
+        # DALL-E models
+        dalle = LLM(model="dall-e-3")
+        result = dalle(prompt="A cat astronaut in space", size="1024x1792")
+        
+        # Gemini image models
+        gemini_img = LLM(model="gemini-2.5-flash-image")
+        result = gemini_img(prompt="Abstract art", number_of_images=2)
+        
+        # Check if model generates images
+        if llm.is_image_model:
+            result = llm(prompt="Your prompt here")
+        else:
+            result = llm(messages=[{"role": "user", "content": "Your message"}])
 
     Using Multimodal Beta Mode:
         # Enable mm_beta for rich AssistantTurn responses
@@ -970,6 +1116,9 @@ class LLM:
     """
     def __new__(cls, model: str = None, profile: str = 'default', backend: str = None, 
                 mm_beta: bool = False, **kwargs):
+
+        if _is_image_generation_model(model):
+            mm_beta = True
 
         # Priority 1: If model is specified, use LLMFactory with model
         if model:
