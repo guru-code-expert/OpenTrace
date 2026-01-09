@@ -61,7 +61,7 @@ class OPROPromptSymbolSet(OptimizerPromptSymbolSet):
     """
 
     instruction_section_title = "# Instruction"
-    variable_section_title = "# Solution"
+    variables_section_title = "# Solution"
     feedback_section_title = "# Feedback"
     context_section_title = "# Context"
 
@@ -129,7 +129,7 @@ class ProblemInstance:
     instruction: str
     variables: Union[str, List[ContentBlock]]
     feedback: str
-    context: Optional[str]
+    context: Optional[ContentBlockList]
 
     optimizer_prompt_symbol_set: OPROPromptSymbolSet
 
@@ -172,8 +172,8 @@ class ProblemInstance:
                {context}
                """)
 
-        if self.context is not None and self.context.strip() != "":
-            context_section = context_section.format(context=self.context)
+        if self.context is not None and self.context.to_text().strip() != "":
+            context_section = context_section.format(context=self.context.to_text())
             optimization_query += context_section
 
         return optimization_query
@@ -200,8 +200,9 @@ class ProblemInstance:
         blocks.append(f"\n\n# Feedback\n{self.feedback}")
         
         # Context section (optional)
-        if self.context is not None and self.context.strip() != "":
-            blocks.append(f"\n\n# Context\n{self.context}")
+        if self.context is not None and self.context.to_text().strip() != "":
+            blocks.append(f"\n\n# Context\n")
+            blocks.extend(self.context)
         
         return blocks
 
@@ -340,7 +341,7 @@ class OPROv3(OptoPrimeV3):
                  optimizer_prompt_symbol_set: OptimizerPromptSymbolSet = None,
                  include_example=False, # default example in OptoPrimeV2 does not work in OPRO
                  memory_size=5,
-                 problem_context: Optional[str] = None,
+                 problem_context: Optional[ContentBlockList] = None,
                  **kwargs):
         """Initialize the OPROv2 optimizer.
 
