@@ -87,11 +87,13 @@ def test_truncate_from_start():
     assert messages[1]["role"] == "user"
     assert "umbrella" in messages[1]["content"][0]["text"]
     assert messages[2]["role"] == "assistant"
-    assert "umbrella" in messages[2]["content"]
+    # Content is now a list of dicts with type and text fields
+    assert any("umbrella" in item.get("text", "") for item in messages[2]["content"])
     assert messages[3]["role"] == "user"
     assert "Thanks" in messages[3]["content"][0]["text"]
     assert messages[4]["role"] == "assistant"
-    assert "welcome" in messages[4]["content"]
+    # Content is now a list of dicts with type and text fields
+    assert any("welcome" in item.get("text", "") for item in messages[4]["content"])
 
 
 def test_truncate_from_end():
@@ -111,11 +113,13 @@ def test_truncate_from_end():
     assert messages[1]["role"] == "user"
     assert "Hello" in messages[1]["content"][0]["text"]
     assert messages[2]["role"] == "assistant"
-    assert "sunny" in messages[2]["content"]
+    # Content is now a list of dicts with type and text fields
+    assert any("sunny" in item.get("text", "") for item in messages[2]["content"])
     assert messages[3]["role"] == "user"
     assert "tomorrow" in messages[3]["content"][0]["text"]
     assert messages[4]["role"] == "assistant"
-    assert "rainy" in messages[4]["content"]
+    # Content is now a list of dicts with type and text fields
+    assert any("rainy" in item.get("text", "") for item in messages[4]["content"])
 
 
 def test_truncate_zero_turns():
@@ -216,16 +220,16 @@ def test_user_turn_multiple_images():
     assert len(user_msg["content"]) == 3
     
     # Check first item is text
-    assert user_msg["content"][0]["type"] == "text"
+    assert user_msg["content"][0]["type"] == "input_text"
     assert user_msg["content"][0]["text"] == "What are in these images? Is there any difference between them?"
     
     # Check second item is first image
-    assert user_msg["content"][1]["type"] == "image_url"
-    assert user_msg["content"][1]["image_url"]["url"] == "https://images.pexels.com/photos/736230/pexels-photo-736230.jpeg"
+    assert user_msg["content"][1]["type"] == "input_image"
+    assert user_msg["content"][1]["image_url"] == "https://images.pexels.com/photos/736230/pexels-photo-736230.jpeg"
     
     # Check third item is second image
-    assert user_msg["content"][2]["type"] == "image_url"
-    assert user_msg["content"][2]["image_url"]["url"] == "https://images.contentstack.io/v3/assets/bltcedd8dbd5891265b/blt134818d279038650/6668df6434f6fb5cd48aac34/beautiful-flowers-rose.jpeg"
+    assert user_msg["content"][2]["type"] == "input_image"
+    assert user_msg["content"][2]["image_url"] == "https://images.contentstack.io/v3/assets/bltcedd8dbd5891265b/blt134818d279038650/6668df6434f6fb5cd48aac34/beautiful-flowers-rose.jpeg"
 
 
 def test_assistant_turn_multiple_images():
@@ -246,8 +250,8 @@ def test_assistant_turn_multiple_images():
     assert len(messages) == 1
     assert messages[0]["role"] == "assistant"
     
-    # Assistant should have text content
-    assert "Here are two generated images" in messages[0]["content"]
+    # Assistant should have text content (now in list format)
+    assert any("Here are two generated images" in item.get("text", "") for item in messages[0]["content"])
 
 
 def test_mixed_content_types_in_turn():
@@ -270,10 +274,10 @@ def test_mixed_content_types_in_turn():
     
     # Should have 4 content blocks: text, image, image, text
     assert len(user_msg["content"]) == 4
-    assert user_msg["content"][0]["type"] == "text"
-    assert user_msg["content"][1]["type"] == "image_url"
-    assert user_msg["content"][2]["type"] == "image_url"
-    assert user_msg["content"][3]["type"] == "text"
+    assert user_msg["content"][0]["type"] == "input_text"
+    assert user_msg["content"][1]["type"] == "input_image"
+    assert user_msg["content"][2]["type"] == "input_image"
+    assert user_msg["content"][3]["type"] == "input_text"
 
 
 def test_multiple_images_with_base64():
@@ -300,11 +304,11 @@ def test_multiple_images_with_base64():
     assert len(user_msg["content"]) == 3
     
     # Check base64 data URLs are properly formatted
-    assert user_msg["content"][1]["type"] == "image_url"
-    assert user_msg["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert user_msg["content"][1]["type"] == "input_image"
+    assert user_msg["content"][1]["image_url"].startswith("data:image/png;base64,")
     
-    assert user_msg["content"][2]["type"] == "image_url"
-    assert user_msg["content"][2]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    assert user_msg["content"][2]["type"] == "input_image"
+    assert user_msg["content"][2]["image_url"].startswith("data:image/jpeg;base64,")
 
 
 def test_conversation_with_multiple_multi_image_turns():
@@ -366,7 +370,7 @@ def test_truncate_multimodal_conversation():
     
     # Check that multimodal content is preserved
     assert len(messages[1]["content"]) == 2  # text + image
-    assert messages[1]["content"][1]["type"] == "image_url"
+    assert messages[1]["content"][1]["type"] == "input_image"
 
 # ============================================================================
 # Real LLM Call Tests with Images
@@ -399,11 +403,12 @@ def test_real_llm_call_with_multiple_images():
     print("="*80)
     print(f"\nSending {len(user_turn.content)} content blocks (1 text + 2 images)...")
     
-    # Make the LLM call
-    llm = LLM()
+    # Make the LLM call with mm_beta=True for Response API format
+    llm = LLM(mm_beta=True)
     response = llm(messages=messages, max_tokens=500)
     
-    response_content = response.choices[0].message.content
+    # response is now an AssistantTurn object
+    response_content = response.to_text()
     
     print("\n📷 User Query:")
     print("  What are in these images? Is there any difference between them?")
@@ -413,8 +418,7 @@ def test_real_llm_call_with_multiple_images():
     print("-" * 40)
     
     # Store assistant response in history
-    assistant_turn = AssistantTurn().add_text(response_content)
-    history.add_assistant_turn(assistant_turn)
+    history.add_assistant_turn(response)
     
     # Verify we got a meaningful response
     assert response_content is not None
@@ -438,7 +442,7 @@ def test_real_llm_multi_turn_with_images():
     from opto.utils.llm import LLM
     
     history = ConversationHistory(system_prompt="You are a helpful assistant that can analyze images.")
-    llm = LLM()
+    llm = LLM(mm_beta=True)
     
     print("\n" + "="*80)
     print("MULTI-TURN CONVERSATION WITH IMAGES")
@@ -457,12 +461,12 @@ def test_real_llm_multi_turn_with_images():
     print("  What type of flowers are shown in these images? [+ 2 images]")
     
     response1 = llm(messages=messages, max_tokens=300)
-    response1_content = response1.choices[0].message.content
+    response1_content = response1.to_text()
     
     print("\n🤖 Turn 1 - Assistant:")
     print(f"  {response1_content[:200]}...")
     
-    history.add_assistant_turn(AssistantTurn().add_text(response1_content))
+    history.add_assistant_turn(response1)
     
     # Turn 2: Follow-up question (no new images, but context from previous turn)
     user_turn2 = UserTurn().add_text("Which of these flowers would be better for a romantic gift and why?")
@@ -474,7 +478,7 @@ def test_real_llm_multi_turn_with_images():
     print("  Which of these flowers would be better for a romantic gift and why?")
     
     response2 = llm(messages=messages, max_tokens=300)
-    response2_content = response2.choices[0].message.content
+    response2_content = response2.to_text()
     
     print("\n🤖 Turn 2 - Assistant:")
     print(f"  {response2_content[:200]}...")
@@ -501,7 +505,7 @@ def test_real_llm_multi_turn_with_images_updated_assistant_turn():
     from opto.utils.llm import LLM
     
     history = ConversationHistory(system_prompt="You are a helpful assistant that can analyze images.")
-    llm = LLM()
+    llm = LLM(mm_beta=True)
     
     print("\n" + "="*80)
     print("MULTI-TURN CONVERSATION WITH IMAGES")
@@ -519,8 +523,7 @@ def test_real_llm_multi_turn_with_images_updated_assistant_turn():
     print("\n📷 Turn 1 - User:")
     print("  What type of flowers are shown in these images? [+ 2 images]")
     
-    response1 = llm(messages=messages, max_tokens=300)
-    at = AssistantTurn(response1)
+    at = llm(messages=messages, max_tokens=300)
     
     print("\n🤖 Turn 1 - Assistant:")
     print(f"  {at.to_text()[:200]}...")
@@ -537,7 +540,7 @@ def test_real_llm_multi_turn_with_images_updated_assistant_turn():
     print("  Which of these flowers would be better for a romantic gift and why?")
     
     response2 = llm(messages=messages, max_tokens=300)
-    response2_content = response2.choices[0].message.content
+    response2_content = response2.to_text()
     
     print("\n🤖 Turn 2 - Assistant:")
     print(f"  {response2_content[:200]}...")
@@ -568,7 +571,7 @@ def test_real_google_genai_multi_turn_with_images_updated():
     
     # Use a Gemini model that supports image generation
     model = "gemini-2.5-flash-image"
-    llm = LLM(model=model)
+    llm = LLM(model=model, mm_beta=True)
     
     print("="*80)
     
@@ -576,12 +579,13 @@ def test_real_google_genai_multi_turn_with_images_updated():
     user_turn1 = UserTurn().add_text("Generate an image of a serene mountain landscape at sunrise with a lake in the foreground.")
     
     history.add_user_turn(user_turn1)
-    messages = history.to_gemini_format()
     
     print("\n📷 Turn 1 - User:")
     print("  Generate an image of a serene mountain landscape at sunrise with a lake in the foreground.")
     
-    response1 = llm(messages=messages, max_tokens=300)
+    # For image generation models, pass the prompt directly instead of messages
+    prompt = user_turn1.content.to_text()
+    response1 = llm(prompt=prompt, max_tokens=300)
     at = AssistantTurn(response1)
     
     print("\n🤖 Turn 1 - Assistant:")
