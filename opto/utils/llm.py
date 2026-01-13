@@ -328,8 +328,23 @@ class LiteLLM(AbstractModel):
     To use this, set the credentials through the environment variable as
     instructed in the LiteLLM documentation. For convenience, you can set the
     default model name through the environment variable TRACE_LITELLM_MODEL.
-    When using Azure models via token provider, you can set the Azure token
-    provider scope through the environment variable AZURE_TOKEN_PROVIDER_SCOPE.
+    
+    Azure OpenAI Authentication:
+        Two authentication methods are supported for Azure OpenAI:
+        
+        1. API Key Authentication (Recommended for most users):
+           Set these environment variables:
+           - AZURE_API_KEY: Your Azure OpenAI API key
+           - AZURE_API_BASE: Your Azure OpenAI endpoint (e.g., https://your-resource.openai.azure.com)
+           - AZURE_API_VERSION: API version (e.g., 2024-08-01-preview)
+           - TRACE_LITELLM_MODEL: Model name with azure/ prefix (e.g., azure/o4-mini)
+           
+           Do NOT set AZURE_TOKEN_PROVIDER_SCOPE for this method.
+        
+        2. Azure AD Credential Authentication (For enterprise users):
+           Set AZURE_TOKEN_PROVIDER_SCOPE (e.g., https://cognitiveservices.azure.com/.default)
+           to use Azure Identity credential-based authentication.
+           This method does NOT use AZURE_API_KEY.
     
     This class now supports storing default completion parameters (like temperature,
     top_p, max_tokens, etc.) that will be used for all calls unless overridden.
@@ -410,6 +425,7 @@ class LiteLLM(AbstractModel):
         if model_name.startswith('azure/'):  # azure model
             azure_token_provider_scope = os.environ.get('AZURE_TOKEN_PROVIDER_SCOPE', None)
             if azure_token_provider_scope is not None:
+                # Azure AD credential-based authentication
                 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
                 credential = get_bearer_token_provider(DefaultAzureCredential(), azure_token_provider_scope)
                 if mm_beta:
@@ -431,6 +447,43 @@ class LiteLLM(AbstractModel):
                     return lambda *args, **kwargs: retry_with_exponential_backoff(
                         lambda: api_func(model_name, *args,
                                        azure_ad_token_provider=credential, **{**default_params, **kwargs}),
+                        max_retries=max_retries,
+                        base_delay=base_delay,
+                        operation_name=operation_name
+                    )
+            else:
+                # Azure API key authentication - explicitly pass Azure env vars if available
+                azure_params = {}
+                if 'api_key' not in default_params:
+                    azure_api_key = os.environ.get('AZURE_API_KEY')
+                    if azure_api_key:
+                        azure_params['api_key'] = azure_api_key
+                if 'api_base' not in default_params:
+                    azure_api_base = os.environ.get('AZURE_API_BASE')
+                    if azure_api_base:
+                        azure_params['api_base'] = azure_api_base
+                if 'api_version' not in default_params:
+                    azure_api_version = os.environ.get('AZURE_API_VERSION')
+                    if azure_api_version:
+                        azure_params['api_version'] = azure_api_version
+                
+                if mm_beta:
+                    # Responses API: model as keyword argument, convert messages to input
+                    def azure_key_responses_wrapper(*args, **kwargs):
+                        # Convert 'messages' to 'input' for Responses API
+                        if 'messages' in kwargs and 'input' not in kwargs:
+                            kwargs['input'] = kwargs.pop('messages')
+                        return retry_with_exponential_backoff(
+                            lambda: api_func(model=model_name, **{**azure_params, **default_params, **kwargs}),
+                            max_retries=max_retries,
+                            base_delay=base_delay,
+                            operation_name=operation_name
+                        )
+                    return azure_key_responses_wrapper
+                else:
+                    # Completion API: model as positional argument
+                    return lambda *args, **kwargs: retry_with_exponential_backoff(
+                        lambda: api_func(model_name, *args, **{**azure_params, **default_params, **kwargs}),
                         max_retries=max_retries,
                         base_delay=base_delay,
                         operation_name=operation_name
@@ -960,16 +1013,20 @@ class LLM:
     A unified entry point for all supported LLM backends.
 
     The LLM class provides a simple interface for creating language model instances.
-    By default, it uses gpt-4o-mini through LiteLLM.
+    By default, it uses gpt-4o through LiteLLM unless TRACE_LITELLM_MODEL is set.
 
     Basic Usage:
-        # Use default model (gpt-4o-mini)
+        # Use default model (gpt-4o, unless TRACE_LITELLM_MODEL is set)
         llm = LLM()
         
-        # Specify a model directly
+        # Specify a model directly (highest priority)
         llm = LLM(model="gpt-4o")
         llm = LLM(model="claude-3-5-sonnet-latest")
         llm = LLM(model="o1-preview")
+        
+        # Use Azure OpenAI via environment variable
+        os.environ["TRACE_LITELLM_MODEL"] = "azure/o4-mini"
+        llm = LLM()  # Automatically uses Azure with proper auth
         
         # Add LiteLLM parameters
         llm = LLM(model="gpt-4o", temperature=0.7, max_tokens=2000)
@@ -1073,6 +1130,28 @@ class LLM:
         # export TRACE_DEFAULT_LLM_BACKEND=AutoGen
         llm = LLM()
 
+    Model Selection Priority (when no model= argument is provided):
+        The LLM class follows this priority order for determining which model to use:
+        
+        1. Explicit model argument: LLM(model="gpt-4o")
+        2. TRACE_LITELLM_MODEL environment variable: 
+           # export TRACE_LITELLM_MODEL="azure/o4-mini"
+           llm = LLM()  # Uses azure/o4-mini
+        3. Named profile (default='default'): LLM(profile="my_profile")
+        4. Backend-specific defaults
+        
+        This means setting TRACE_LITELLM_MODEL will be honored even when using
+        default initialization, making it ideal for Azure and custom endpoints:
+        
+        # Azure OpenAI setup
+        os.environ["TRACE_LITELLM_MODEL"] = "azure/o4-mini"
+        os.environ["AZURE_API_KEY"] = "your-key"
+        os.environ["AZURE_API_BASE"] = "https://your-resource.openai.azure.com"
+        os.environ["AZURE_API_VERSION"] = "2024-08-01-preview"
+        
+        # Now LLM() automatically uses Azure
+        llm = LLM(mm_beta=True)  # Uses azure/o4-mini with proper Azure auth
+
     Examples with LiteLLM Parameters:
         # Structured output
         llm = LLM(
@@ -1126,11 +1205,18 @@ class LLM:
                 kwargs['backend'] = backend
             return LLMFactory.get_llm(model=model, mm_beta=mm_beta, **kwargs)
         
-        # Priority 2: If profile is specified, use LLMFactory
+        # Priority 2: Check if TRACE_LITELLM_MODEL is set (honor user's explicit env config)
+        env_model = os.environ.get('TRACE_LITELLM_MODEL')
+        if env_model is not None:
+            if backend is not None:
+                kwargs['backend'] = backend
+            return LLMFactory.get_llm(model=env_model, mm_beta=mm_beta, **kwargs)
+        
+        # Priority 3: If profile is specified, use LLMFactory
         if profile:
             return LLMFactory.get_llm(profile=profile, mm_beta=mm_beta, **kwargs)
         
-        # Priority 3: Use backend-specific instantiation (for AutoGen, CustomLLM, etc.)
+        # Priority 4: Use backend-specific instantiation (for AutoGen, CustomLLM, etc.)
         # This path is for when neither profile nor model is specified
         name = backend or os.getenv("TRACE_DEFAULT_LLM_BACKEND", "LiteLLM")
         try:
