@@ -5,7 +5,6 @@ from opto.optimizers.opro_v2 import OPROv2
 from opto.optimizers.opro_v3 import OPROv3
 from opto.optimizers.textgrad import TextGrad
 from opto.optimizers.optoprime_v2 import OptoPrimeV2
-from opto.optimizers.helix import HELiX
 
 OptoPrime = OptoPrimeV1
 
