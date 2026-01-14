@@ -395,6 +395,16 @@ class LiteLLM(AbstractModel):
                  max_retries=10, base_delay=1.0):
         import litellm
         
+        # For Azure models, set global litellm variables as a fallback
+        # (workaround for potential litellm.responses API issues)
+        if model_name.startswith('azure/'):
+            if os.environ.get('AZURE_API_VERSION') and not hasattr(litellm, '_azure_api_version_set'):
+                try:
+                    litellm.api_version = os.environ.get('AZURE_API_VERSION')
+                    litellm._azure_api_version_set = True  # Mark to avoid setting multiple times
+                except:
+                    pass  # Ignore if litellm doesn't support this
+        
         # Check if this is an image generation model
         is_image_model = _is_image_generation_model(model_name)
         
