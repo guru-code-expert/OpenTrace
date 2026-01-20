@@ -4,7 +4,7 @@ import os
 
 import pytest
 from opto.utils.backbone import (
-    ConversationHistory,
+    Chat,
     UserTurn,
     AssistantTurn
 )

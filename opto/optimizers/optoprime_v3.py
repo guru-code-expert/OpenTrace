@@ -18,7 +18,7 @@ from opto.trace.propagators.propagators import Propagator
 from opto.utils.llm import AbstractModel, LLM
 from opto.optimizers.buffers import FIFOBuffer
 from opto.utils.backbone import (
-    ConversationHistory, UserTurn, AssistantTurn, PromptTemplate,
+    Chat, UserTurn, AssistantTurn, PromptTemplate,
     TextContent, ImageContent, ContentBlockList,
     DEFAULT_IMAGE_PLACEHOLDER, Content
 )
@@ -628,7 +628,7 @@ class OptoPrimeV3(OptoPrime):
         self.log = [] if log else None
         self.summary_log = [] if log else None
         self.memory = FIFOBuffer(memory_size)
-        self.conversation_history = ConversationHistory()
+        self.conversation_history = Chat()
         self.conversation_length = memory_size  # Number of conversation turns to keep
 
         self.default_prompt_symbols = self.optimizer_prompt_symbol_set.default_prompt_symbols
@@ -1257,7 +1257,7 @@ class OptoPrimeV3(OptoPrime):
             self.include_example = state["include_example"]
             self.max_tokens = state["max_tokens"]
             self.memory = state["memory"]
-            self.conversation_history = state.get("conversation_history", ConversationHistory())
+            self.conversation_history = state.get("conversation_history", Chat())
             self.conversation_length = state.get("conversation_length", 0)
             self.default_prompt_symbols = state["default_prompt_symbols"]
             self.prompt_symbols = state["prompt_symbols"]

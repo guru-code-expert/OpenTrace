@@ -11,7 +11,7 @@ import os
 import base64
 import pytest
 from opto.utils.backbone import (
-    ConversationHistory,
+    Chat,
     UserTurn,
     AssistantTurn
 )
@@ -28,7 +28,7 @@ HAS_CREDENTIALS = os.path.exists("OAI_CONFIG_LIST") or os.environ.get("TRACE_LIT
 
 def create_sample_conversation():
     """Create a sample conversation with multiple rounds"""
-    history = ConversationHistory(system_prompt="You are a helpful assistant.")
+    history = Chat(system_prompt="You are a helpful assistant.")
     
     # Round 1
     user1 = UserTurn().add_text("Hello, what's the weather?")
@@ -146,7 +146,7 @@ def test_truncate_more_than_available():
 
 def test_empty_conversation():
     """Test truncation on empty conversation"""
-    history = ConversationHistory(system_prompt="Test")
+    history = Chat(system_prompt="Test")
     
     messages = history.to_messages(n=5)
     
@@ -197,7 +197,7 @@ def test_negative_n_values():
 
 def test_user_turn_multiple_images():
     """Test that a user turn can have multiple images"""
-    history = ConversationHistory()
+    history = Chat()
     
     # Create a user turn with text and multiple images (like the OpenAI example)
     user_turn = (UserTurn()
@@ -234,7 +234,7 @@ def test_user_turn_multiple_images():
 
 def test_assistant_turn_multiple_images():
     """Test that an assistant turn can also have multiple images (for models that generate images)"""
-    history = ConversationHistory()
+    history = Chat()
     
     # Assistant turn with text and multiple images
     assistant_turn = (AssistantTurn()
@@ -256,7 +256,7 @@ def test_assistant_turn_multiple_images():
 
 def test_mixed_content_types_in_turn():
     """Test mixing text, images, and other content types in a single turn"""
-    history = ConversationHistory()
+    history = Chat()
     
     # Create a complex turn with multiple content types
     user_turn = (UserTurn()
@@ -282,7 +282,7 @@ def test_mixed_content_types_in_turn():
 
 def test_multiple_images_with_base64():
     """Test multiple images using base64 encoding"""
-    history = ConversationHistory()
+    history = Chat()
     
     # Create fake base64 image data
     fake_image_data1 = base64.b64encode(b"fake image 1").decode('utf-8')
@@ -313,7 +313,7 @@ def test_multiple_images_with_base64():
 
 def test_conversation_with_multiple_multi_image_turns():
     """Test a full conversation where multiple turns each have multiple images"""
-    history = ConversationHistory(system_prompt="You are a helpful image analysis assistant.")
+    history = Chat(system_prompt="You are a helpful image analysis assistant.")
     
     # User turn 1: Multiple images
     user1 = (UserTurn()
@@ -352,7 +352,7 @@ def test_conversation_with_multiple_multi_image_turns():
 
 def test_truncate_multimodal_conversation():
     """Test truncation works correctly with multimodal content"""
-    history = ConversationHistory(system_prompt="You are a vision assistant.")
+    history = Chat(system_prompt="You are a vision assistant.")
     
     # Add several turns with images (5 rounds = 10 turns)
     for i in range(5):
@@ -385,7 +385,7 @@ def test_real_llm_call_with_multiple_images():
     from opto.utils.llm import LLM
     
     # Create conversation with images
-    history = ConversationHistory(system_prompt="You are a helpful assistant that can analyze images.")
+    history = Chat(system_prompt="You are a helpful assistant that can analyze images.")
     
     # Create a user turn with text and two real flower images
     user_turn = (UserTurn()
@@ -441,7 +441,7 @@ def test_real_llm_multi_turn_with_images():
     """
     from opto.utils.llm import LLM
     
-    history = ConversationHistory(system_prompt="You are a helpful assistant that can analyze images.")
+    history = Chat(system_prompt="You are a helpful assistant that can analyze images.")
     llm = LLM(mm_beta=True)
     
     print("\n" + "="*80)
@@ -504,7 +504,7 @@ def test_real_llm_multi_turn_with_images_updated_assistant_turn():
     """
     from opto.utils.llm import LLM
     
-    history = ConversationHistory(system_prompt="You are a helpful assistant that can analyze images.")
+    history = Chat(system_prompt="You are a helpful assistant that can analyze images.")
     llm = LLM(mm_beta=True)
     
     print("\n" + "="*80)
@@ -566,7 +566,7 @@ def test_real_google_genai_multi_turn_with_images_updated():
     print("="*80)
     
     # Initialize conversation history
-    history = ConversationHistory()
+    history = Chat()
     history.system_prompt = "You are a helpful assistant that can generate and discuss images."
     
     # Use a Gemini model that supports image generation

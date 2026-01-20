@@ -2249,19 +2249,45 @@ class AssistantTurn(Turn):
 
 
 @dataclass
-class ConversationHistory:
+class Chat:
     """Manages conversation history across multiple turns using LiteLLM unified format"""
     turns: List[Union[UserTurn, AssistantTurn]] = field(default_factory=list)
     system_prompt: Optional[str] = None
     protected_rounds: int = 0  # Initial rounds to never truncate (task definition)
 
-    def add_user_turn(self, turn: UserTurn) -> 'ConversationHistory':
-        """Add a user turn"""
-        self.turns.append(turn)
+    def add_user_turn(self, turn: Union[str, ContentBlockList, 'TextContent', 'ImageContent', 'Content', UserTurn]) -> 'Chat':
+        """Add a user turn
+        
+        Args:
+            turn: Can be:
+                - str: Plain text message
+                - ContentBlockList: List of content blocks
+                - TextContent: Single text content block
+                - ImageContent: Single image content block
+                - Content: Multi-modal content wrapper
+                - UserTurn: Complete user turn object
+        
+        Returns:
+            Chat: Self for method chaining
+            
+        Raises:
+            TypeError: If turn is not one of the accepted types
+        """
+        # Accept UserTurn directly
+        if isinstance(turn, UserTurn):
+            self.turns.append(turn)
+            return self
+
+        assert isinstance(
+            turn, (str, ContentBlockList, TextContent, ImageContent, Content)
+        ), "turn must be a string, ContentBlockList, TextContent, ImageContent, or Content object"
+        user_turn = UserTurn(content=turn)
+        self.turns.append(user_turn)
         return self
 
-    def add_assistant_turn(self, turn: AssistantTurn) -> 'ConversationHistory':
-        """Add an assistant turn"""
+    def add_assistant_turn(self, turn: AssistantTurn) -> 'Chat':
+        """Add an assistant turn. AssistantTurn parses the response from the LLM."""
+        assert isinstance(turn, AssistantTurn), "turn must be an AssistantTurn object"
         self.turns.append(turn)
         return self
 
@@ -2544,7 +2570,7 @@ class ConversationHistory:
             json.dump(self.to_dict(), f, indent=2)
 
     @classmethod
-    def load_from_file(cls, filepath: str) -> 'ConversationHistory':
+    def load_from_file(cls, filepath: str) -> 'Chat':
         """Load conversation history from JSON file"""
         with open(filepath, 'r') as f:
             data = json.load(f)
