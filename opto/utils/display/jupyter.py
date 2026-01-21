@@ -20,6 +20,17 @@ def _escape(text: str) -> str:
     return html_module.escape(str(text))
 
 
+def _escape_with_linebreaks(text: str) -> str:
+    """HTML escape with proper newline and tab handling."""
+    # First escape HTML
+    escaped = html_module.escape(str(text))
+    # Convert newlines to <br> tags
+    escaped = escaped.replace('\n', '<br>')
+    # Convert tabs to 4 spaces (visible)
+    escaped = escaped.replace('\t', '&nbsp;&nbsp;&nbsp;&nbsp;')
+    return escaped
+
+
 def _render_image_block(block) -> str:
     """Render an image content block."""
     parts = []
@@ -68,25 +79,25 @@ def _render_content_blocks(blocks, block_id: str) -> tuple:
     
     for block in blocks:
         if isinstance(block, TextContent):
-            inline_parts.append(_escape(block.text))
+            inline_parts.append(_escape_with_linebreaks(block.text))
             block_text = str(block)
         elif isinstance(block, ImageContent):
             inline_parts.append(_render_image_block(block))
             num_images += 1
-            block_text = '[IMAGE]'
+            block_text = str(block)  # Show full repr in detail view
         elif isinstance(block, PDFContent):
             inline_parts.append('<div style="display: inline-flex; align-items: center; background: #f0f0f0; '
                                'border: 1px solid #ddd; border-radius: 4px; padding: 8px 12px; margin: 4px 0; '
                                'color: #666; font-size: 0.9em;"><span style="margin-right: 6px; font-size: 1.2em;">📄</span>')
             inline_parts.append('<span>PDF</span></div>')
-            block_text = '[PDF]'
+            block_text = str(block)  # Show full repr in detail view
         elif isinstance(block, FileContent):
             mime_type = getattr(block, 'mime_type', 'unknown')
             inline_parts.append('<div style="display: inline-flex; align-items: center; background: #f0f0f0; '
                                'border: 1px solid #ddd; border-radius: 4px; padding: 8px 12px; margin: 4px 0; '
                                'color: #666; font-size: 0.9em;"><span style="margin-right: 6px; font-size: 1.2em;">📎</span>')
             inline_parts.append(f'<span>File ({mime_type})</span></div>')
-            block_text = f'[FILE: {mime_type}]'
+            block_text = str(block)  # Show full repr in detail view
         else:
             # Unknown block type
             block_text = str(block)
