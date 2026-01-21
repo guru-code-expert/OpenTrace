@@ -287,6 +287,15 @@ class ContentBlockList(list):
         """
         return self.to_text()
     
+    def _repr_html_(self) -> str:
+        """Rich HTML representation for Jupyter notebooks."""
+        try:
+            from opto.utils.display.jupyter import render_content_block_list
+            return render_content_block_list(self)
+        except ImportError:
+            # Fallback to text representation if display module unavailable
+            return None
+    
     def to_content_blocks(self) -> 'ContentBlockList':
         """Return self (for interface compatibility with composites).
         
@@ -1693,6 +1702,22 @@ class UserTurn:
 
     def enable_image_generation(self):
         self.output_contains_image = True
+    
+    def __repr__(self) -> str:
+        """Safe string representation that handles missing attributes."""
+        content_preview = str(self.content)[:50] + "..." if len(str(self.content)) > 50 else str(self.content)
+        parts = [f"UserTurn(content={content_preview!r}"]
+        
+        # Safely add optional fields if they exist
+        tools = getattr(self, 'tools', [])
+        if tools:
+            parts.append(f", tools={len(tools)} tool(s)")
+        temperature = getattr(self, 'temperature', None)
+        if temperature is not None:
+            parts.append(f", temperature={temperature}")
+        
+        parts.append(")")
+        return "".join(parts)
 
     def to_litellm_format(self) -> Dict[str, Any]:
         """Convert to LiteLLM Response API format (OpenAI Response API compatible)"""
@@ -1700,6 +1725,15 @@ class UserTurn:
             "role": "user",
             "content": self.content.to_litellm_format(role="user")
         }
+    
+    def _repr_html_(self) -> str:
+        """Rich HTML representation for Jupyter notebooks with glassmorphism design."""
+        try:
+            from opto.utils.display.jupyter import render_user_turn
+            return render_user_turn(self)
+        except ImportError:
+            # Fallback to text representation if display module unavailable
+            return None
 
 
 @dataclass
@@ -2225,6 +2259,22 @@ class AssistantTurn(Turn):
                 image_blocks.append(block)
         return image_blocks
 
+    def __repr__(self) -> str:
+        """Safe string representation that handles missing attributes."""
+        content_preview = str(self.content)[:50] + "..." if len(str(self.content)) > 50 else str(self.content)
+        parts = [f"AssistantTurn(content={content_preview!r}"]
+        
+        # Safely add optional fields if they exist
+        if hasattr(self, 'model') and self.model:
+            parts.append(f", model={self.model!r}")
+        if hasattr(self, 'prompt_tokens') and self.prompt_tokens:
+            parts.append(f", prompt_tokens={self.prompt_tokens}")
+        if hasattr(self, 'completion_tokens') and self.completion_tokens:
+            parts.append(f", completion_tokens={self.completion_tokens}")
+        
+        parts.append(")")
+        return "".join(parts)
+    
     def to_litellm_format(self) -> Dict[str, Any]:
         """Convert to LiteLLM Response API format (OpenAI Response API compatible)"""
         result = {"role": self.role}
@@ -2246,6 +2296,16 @@ class AssistantTurn(Turn):
             ]
 
         return result
+    
+    
+    def _repr_html_(self) -> str:
+        """Rich HTML representation for Jupyter notebooks with glassmorphism design."""
+        try:
+            from opto.utils.display.jupyter import render_assistant_turn
+            return render_assistant_turn(self)
+        except ImportError:
+            # Fallback to text representation if display module unavailable
+            return None
 
 
 @dataclass
@@ -2600,3 +2660,12 @@ class Chat:
                         # Very rough estimate: ~4 chars per token
                         total += len(block.text) // 4
         return total
+    
+    def _repr_html_(self) -> str:
+        """Rich HTML representation for Jupyter notebooks with glassmorphism design."""
+        try:
+            from opto.utils.display.jupyter import render_chat
+            return render_chat(self)
+        except ImportError:
+            # Fallback to text representation if display module unavailable
+            return None
