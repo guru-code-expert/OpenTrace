@@ -1204,7 +1204,7 @@ class LLM:
         - https://ai.google.dev/gemini-api/docs/system-instructions: Gemini system instructions
     """
     def __new__(cls, model: str = None, profile: str = 'default', backend: str = None, 
-                mm_beta: bool = False, **kwargs):
+                mm_beta: bool = True, **kwargs):
 
         if _is_image_generation_model(model):
             mm_beta = True
