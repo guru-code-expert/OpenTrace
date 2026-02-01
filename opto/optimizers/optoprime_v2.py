@@ -428,7 +428,7 @@ class OptoPrimeV2(OptoPrime):
 
         self.use_json_object_format = use_json_object_format if optimizer_prompt_symbol_set.expect_json and use_json_object_format else False
         self.ignore_extraction_error = ignore_extraction_error
-        self.llm = llm or LLM()
+        self.llm = llm or LLM(mm_beta=True)
         self.objective = objective or self.default_objective.format(value_tag=optimizer_prompt_symbol_set.value_tag,
                                                                     variables_section_title=optimizer_prompt_symbol_set.variables_section_title,
                                                                     feedback_section_title=optimizer_prompt_symbol_set.feedback_section_title)

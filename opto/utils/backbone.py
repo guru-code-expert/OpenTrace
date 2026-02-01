@@ -2004,8 +2004,89 @@ class AssistantTurn(Turn):
             "metadata": {}
         }
         
+        # Handle Bedrock Converse API format (has 'output' field with 'message')
+        # Check both attribute-based and dict-based access for robustness
+        is_bedrock = False
+        bedrock_output = None
+        bedrock_value = value  # Keep reference to the original value for later access
+        
+        # Try attribute-based access first
+        if hasattr(value, 'output'):
+            output_val = value.output
+            
+            if hasattr(output_val, 'message'):
+                is_bedrock = True
+                bedrock_output = output_val
+            # Also check dict-based access on the output attribute
+            elif isinstance(output_val, dict) and 'message' in output_val:
+                is_bedrock = True
+                bedrock_output = output_val
+        
+        # If not found, try dict-based access on value itself
+        if not is_bedrock and isinstance(value, dict) and 'output' in value:
+            output_val = value['output']
+            if isinstance(output_val, dict) and 'message' in output_val:
+                is_bedrock = True
+                bedrock_output = output_val
+                bedrock_value = value  # Use the dict directly
+        
+        if is_bedrock and bedrock_output is not None:
+            # Bedrock Converse API format detected
+            # Get message with dict or attr access
+            message = bedrock_output.get('message') if isinstance(bedrock_output, dict) else (bedrock_output.message if hasattr(bedrock_output, 'message') else None)
+            
+            if message:
+                # Extract role
+                if isinstance(message, dict):
+                    result["role"] = message.get('role', 'assistant')
+                elif hasattr(message, 'role'):
+                    result["role"] = message.role
+                
+                # Extract content
+                content_list = message.get('content') if isinstance(message, dict) else (message.content if hasattr(message, 'content') else None)
+                
+                if content_list:
+                    for content_item in content_list:
+                        # Handle text content (dict or attr)
+                        text_val = None
+                        if isinstance(content_item, dict):
+                            text_val = content_item.get('text')
+                        elif hasattr(content_item, 'text'):
+                            text_val = content_item.text
+                        
+                        if text_val:
+                            result["content"].append(TextContent(text=text_val))
+            
+            # Extract finish reason from stopReason (check both value and bedrock_value)
+            stop_reason = None
+            if isinstance(bedrock_value, dict):
+                stop_reason = bedrock_value.get('stopReason')
+            elif hasattr(bedrock_value, 'stopReason'):
+                stop_reason = bedrock_value.stopReason
+            if stop_reason:
+                result["finish_reason"] = stop_reason
+            
+            # Extract token usage (check both value and bedrock_value)
+            usage = None
+            if isinstance(bedrock_value, dict):
+                usage = bedrock_value.get('usage')
+            elif hasattr(bedrock_value, 'usage'):
+                usage = bedrock_value.usage
+            
+            if usage:
+                if isinstance(usage, dict):
+                    result["prompt_tokens"] = usage.get('inputTokens')
+                    result["completion_tokens"] = usage.get('outputTokens')
+                else:
+                    if hasattr(usage, 'inputTokens'):
+                        result["prompt_tokens"] = usage.inputTokens
+                    if hasattr(usage, 'outputTokens'):
+                        result["completion_tokens"] = usage.outputTokens
+        
         # Handle Responses API format (new format with 'output' field)
-        if hasattr(value, 'output') and hasattr(value, 'object') and value.object == 'response':
+        # The output field is a list of output items (messages, image generation calls, etc.)
+        # NOTE: LiteLLM may set value.object to 'chat.completion' or 'response' depending on the provider
+        elif hasattr(value, 'output') and hasattr(value, 'object'):
             # Extract metadata
             if hasattr(value, 'id'):
                 result["metadata"]['response_id'] = value.id
@@ -2020,7 +2101,7 @@ class AssistantTurn(Turn):
             if hasattr(value, 'status'):
                 result["finish_reason"] = value.status
             
-            # Extract content from output
+            # Extract content from output (list of output items)
             if value.output and len(value.output) > 0:
                 for output_item in value.output:
                     # Handle ImageGenerationCall
@@ -2154,6 +2235,7 @@ class AssistantTurn(Turn):
         Returns:
             Dict[str, Any]: Dictionary with keys corresponding to AssistantTurn fields
         """
+        
         # Check if this is a normalized response (from our GoogleGenAILLM)
         raw_response = value.raw_response if hasattr(value, 'raw_response') else value
         
@@ -2165,10 +2247,15 @@ class AssistantTurn(Turn):
            hasattr(raw_response, 'usage_metadata'):
             return AssistantTurn.from_google_genai(value)
         
-        # Detect LiteLLM/OpenAI format (Responses API or Completion API)
+        # Detect LiteLLM/OpenAI/Bedrock format (Responses API, Completion API, or Bedrock Converse)
         # Responses API has 'output' field and object='response'
         # Completion API has 'choices' field
-        elif hasattr(value, 'output') or hasattr(value, 'choices'):
+        # Bedrock Converse API has 'output' field with nested 'message'
+        # Check both attribute and dict-based access
+        has_output = hasattr(value, 'output') or (isinstance(value, dict) and 'output' in value)
+        has_choices = hasattr(value, 'choices') or (isinstance(value, dict) and 'choices' in value)
+        
+        if has_output or has_choices:
             return AssistantTurn.from_litellm_openai_response_api(value)
         
         # Fallback: if has 'text' attribute, might be a simple Google response
