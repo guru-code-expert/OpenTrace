@@ -12,6 +12,7 @@ from opto.trace.propagators import TraceGraph, GraphPropagator
 from opto.trace.propagators.propagators import Propagator
 from opto.optimizers.optimizer import Optimizer
 from opto.optimizers.buffers import FIFOBuffer
+from opto.optimizers.utils import is_bedrock_model
 from opto.utils.llm import AbstractModel, LLM
 
 
@@ -948,13 +949,16 @@ class OptoPrime(Optimizer):
             {"role": "user", "content": user_prompt},
         ]
 
-        response_format =  {"type": "json_object"} if self.use_json_object_format else None
-        try:  # Try tp force it to be a json object
+        # Bedrock doesn't support response_format natively - LiteLLM adds tools which breaks the response
+        _is_bedrock = hasattr(self.llm, 'model_name') and is_bedrock_model(self.llm.model_name)
+        
+        response_format = {"type": "json_object"} if (self.use_json_object_format and not _is_bedrock) else None
+        try:  # Try to force it to be a json object
             response = self.llm(messages=messages, max_tokens=max_tokens, response_format=response_format)
         except Exception:
             response = self.llm(messages=messages, max_tokens=max_tokens)
 
-        response = response.choices[0].message.content
+        response = response.content
 
         if verbose:
             print("LLM response:\n", response)

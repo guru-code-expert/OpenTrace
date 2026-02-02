@@ -10,6 +10,27 @@ except ImportError:
 
 import opto.trace as trace
 
+
+def is_bedrock_model(model_name: str) -> bool:
+    """
+    Check if a model name represents an AWS Bedrock model.
+    
+    Bedrock models in LiteLLM can be represented as:
+    - "bedrock/us.anthropic.claude-3-7-sonnet-20250219-v1:0" (with bedrock/ prefix)
+    - "us.anthropic.claude-3-7-sonnet-20250219-v1:0" (region prefix only)
+    
+    Args:
+        model_name: The model name string to check
+        
+    Returns:
+        True if the model is a Bedrock model, False otherwise
+    """
+    if model_name.startswith('bedrock/'):
+        return True
+    # Check for AWS region prefixes (us-east-1, eu-west-1, ap-northeast-1, etc.)
+    return any(model_name.startswith(f'{region}.') for region in ('us', 'eu', 'ap'))
+
+
 def print_color(message, color=None, logger=None):
     colors = {
         "red": "\033[91m",

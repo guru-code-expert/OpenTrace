@@ -10,7 +10,7 @@ from typing import List, Union, Tuple, Optional
 from dataclasses import dataclass
 from opto.optimizers.optoprime import OptoPrime, node_to_function_feedback
 from opto.trace.utils import dedent
-from opto.optimizers.utils import truncate_expression, extract_xml_like_data
+from opto.optimizers.utils import truncate_expression, extract_xml_like_data, is_bedrock_model
 from opto.trace.nodes import ParameterNode, is_image
 from opto.trace.propagators import GraphPropagator
 from opto.trace.propagators.propagators import Propagator
@@ -1205,7 +1205,9 @@ class OptoPrimeV3(OptoPrime):
             model_name=self.llm.model_name
         )
 
-        response_format = {"type": "json_object"} if self.use_json_object_format else None
+        # Bedrock doesn't support response_format natively - LiteLLM adds tools which breaks the response
+        _is_bedrock = hasattr(self.llm, 'model_name') and is_bedrock_model(self.llm.model_name)
+        response_format = {"type": "json_object"} if (self.use_json_object_format and not _is_bedrock) else None
 
         # Prepare common arguments
         llm_kwargs = {"messages": messages, "max_tokens": max_tokens, "response_format": response_format}

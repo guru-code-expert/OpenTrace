@@ -1141,20 +1141,26 @@ class ImageContent(ContentBlock):
             if value.startswith('http://') or value.startswith('https://'):
                 return {"image_url": value, "image_data": None, "image_bytes": None, "media_type": "image/jpeg"}
             
-            # File path
-            path = Path(value)
-            if path.exists():
-                ext_to_type = {
-                    '.jpg': 'image/jpeg',
-                    '.jpeg': 'image/jpeg',
-                    '.png': 'image/png',
-                    '.gif': 'image/gif',
-                    '.webp': 'image/webp'
-                }
-                media_type = ext_to_type.get(path.suffix.lower(), 'image/jpeg')
-                with open(value, 'rb') as f:
-                    image_data = base64.b64encode(f.read()).decode('utf-8')
-                return {"image_url": None, "image_data": image_data, "image_bytes": None, "media_type": media_type}
+            # File path - only check if string is reasonable length (< 4096 chars)
+            # Long strings are clearly not file paths and would cause OS errors
+            if len(value) < 4096:
+                path = Path(value)
+                try:
+                    if path.exists():
+                        ext_to_type = {
+                            '.jpg': 'image/jpeg',
+                            '.jpeg': 'image/jpeg',
+                            '.png': 'image/png',
+                            '.gif': 'image/gif',
+                            '.webp': 'image/webp'
+                        }
+                        media_type = ext_to_type.get(path.suffix.lower(), 'image/jpeg')
+                        with open(value, 'rb') as f:
+                            image_data = base64.b64encode(f.read()).decode('utf-8')
+                        return {"image_url": None, "image_data": image_data, "image_bytes": None, "media_type": media_type}
+                except (OSError, IOError):
+                    # Not a valid file path, continue to other checks
+                    pass
                     
         # Handle bytes - store as base64 for portability
         if isinstance(value, bytes):
