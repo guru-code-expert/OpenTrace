@@ -25,6 +25,9 @@ def is_bedrock_model(model_name: str) -> bool:
     Returns:
         True if the model is a Bedrock model, False otherwise
     """
+    if model_name is None:
+        return False
+
     if model_name.startswith('bedrock/'):
         return True
     # Check for AWS region prefixes (us-east-1, eu-west-1, ap-northeast-1, etc.)
