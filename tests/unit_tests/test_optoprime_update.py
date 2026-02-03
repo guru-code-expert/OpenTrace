@@ -1,8 +1,11 @@
 from opto import trace
 from opto.optimizers import OptoPrime
 from opto.utils.llm import DummyLLM
+from dataclasses import dataclass
 
-
+@dataclass
+class DummyTurn:
+    content: str
 
 def test_json_keys():
     """
@@ -29,7 +32,7 @@ If you need to suggest a change in the values of #Variables, write down the sugg
         assert '"answer":' not in messages[0]['content']
         highlight_prompt = "What are your suggestions on variables int0?"
         assert highlight_prompt in  messages[1]['content']  # user
-        return "Dummy response" #messages
+        return DummyTurn(content="Dummy response") #messages
 
     llm = DummyLLM(callable)
     
