@@ -1015,6 +1015,7 @@ class DummyLLM(AbstractModel):
         class Response:
             def __init__(self, content):
                 self.choices = [Choice(content)]
+                self.content = content  # for the AssistantTurn API
 
         return lambda *args, **kwargs:  Response(self.callable(*args, **kwargs))
 
