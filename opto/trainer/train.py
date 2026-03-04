@@ -4,7 +4,7 @@ import importlib
 from opto import trace
 from opto.trainer.algorithms import Trainer
 from opto.trainer.guide import Guide
-from opto.trainer.loggers import BaseLogger
+from opto.trainer.loggers import BaseLogger, DefaultLogger, NullLogger
 from opto.optimizers.optimizer import Optimizer
 from opto.trace.nodes import ParameterNode
 
@@ -57,7 +57,7 @@ def train(
     algorithm: Union[Trainer, str] = 'MinibatchAlgorithm',
     optimizer: Union[Optimizer, str] = None,
     guide: Union[Guide, str] = 'LLMJudge',
-    logger: Union[BaseLogger, str] = 'ConsoleLogger',
+    logger: Union[BaseLogger, str, None] = 'ConsoleLogger',
     # extra configs
     optimizer_kwargs: Union[dict, None] = None,
     guide_kwargs: Union[dict, None] = None,
@@ -156,6 +156,8 @@ def train(
     optimizer_kwargs = optimizer_kwargs or {}  # this can be used to pass extra optimizer configs, like llm object explictly
     guide_kwargs = guide_kwargs or {}
     logger_kwargs = logger_kwargs or {}
+    if logger is None:
+        logger = 'ConsoleLogger'
 
     #  TODO check eligible optimizer, trainer
     dataset_check(train_dataset)
@@ -196,11 +198,22 @@ def train(
     logger = load_logger(logger, **logger_kwargs)
     assert isinstance(logger, BaseLogger)
 
-    algo = trainer_class(
-        model,
-        optimizer,
-        logger=logger
-    )
+    try:
+        algo = trainer_class(
+            model,
+            optimizer,
+            logger=logger
+        )
+    except TypeError as e:
+        msg = str(e)
+        if ('logger' in msg) and ('unexpected keyword argument' in msg or 'got an unexpected keyword' in msg):
+            print(f"[WARN] Trainer {getattr(trainer_class, '__name__', trainer_class)} does not accept logger; continuing.")
+            algo = trainer_class(
+                model,
+                optimizer
+            )
+        else:
+            raise
 
     return algo.train(
         guide=guide,
@@ -233,17 +246,37 @@ def load_guide(guide: Union[Guide, str], **kwargs) -> Guide:
     else:
         raise ValueError(f"Invalid guide type: {type(guide)}")
 
-def load_logger(logger: Union[BaseLogger, str], **kwargs) -> BaseLogger:
+def load_logger(logger: Union[BaseLogger, str, None], **kwargs) -> BaseLogger:
+    if logger is None:
+        return DefaultLogger(**kwargs)
+
     if isinstance(logger, BaseLogger):
         return logger
-    elif isinstance(logger, str):
-        loggers_module = importlib.import_module("opto.trainer.loggers")
-        logger_class = getattr(loggers_module, logger)
-        return logger_class(**kwargs)
-    elif issubclass(logger, BaseLogger):
-        return logger(**kwargs)
-    else:
-        raise ValueError(f"Invalid logger type: {type(logger)}")
+    if isinstance(logger, str):
+        name = logger.strip()
+        if not name:
+            return DefaultLogger(**kwargs)
+        if name.lower() in {"none", "null", "off", "disable", "disabled"}:
+            return NullLogger(**kwargs)
+        try:
+            loggers_module = importlib.import_module("opto.trainer.loggers")
+            logger_class = getattr(loggers_module, name)
+        except Exception as e:
+            print(f"[WARN] Unknown logger '{name}': {e}. Falling back to DefaultLogger.")
+            return DefaultLogger(**kwargs)
+        try:
+            return logger_class(**kwargs)
+        except Exception as e:
+            print(f"[WARN] Failed to initialize logger '{name}': {e}. Falling back to DefaultLogger.")
+            return DefaultLogger(**kwargs)
+    if isinstance(logger, type) and issubclass(logger, BaseLogger):
+        try:
+            return logger(**kwargs)
+        except Exception as e:
+            print(f"[WARN] Failed to initialize logger class '{logger}': {e}. Falling back to DefaultLogger.")
+            return DefaultLogger(**kwargs)
+    print(f"[WARN] Invalid logger type: {type(logger)}. Falling back to DefaultLogger.")
+    return DefaultLogger(**kwargs)
 
 def load_trainer_class(trainer: Union[Trainer, str]) -> Trainer:
     if isinstance(trainer, str):

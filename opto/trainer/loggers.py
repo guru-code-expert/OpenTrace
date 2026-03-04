@@ -19,6 +19,25 @@ class BaseLogger:
         raise NotImplementedError("Subclasses should implement this method.")
 
 
+class NullLogger(BaseLogger):
+    """A no-op logger that silently discards all metrics."""
+
+    def log(self, name, data, step, **kwargs):
+        return
+
+
+def list_logger_names(include_none: bool = True):
+    """List available logger class names exposed by this module."""
+    names = []
+    for key, value in globals().items():
+        if isinstance(value, type) and issubclass(value, BaseLogger) and value is not BaseLogger:
+            if key == "NullLogger":
+                continue
+            names.append(key)
+    names = sorted(set(names))
+    return (["none"] if include_none else []) + names
+
+
 class ConsoleLogger(BaseLogger):
     """A simple logger that prints messages to the console."""
     
