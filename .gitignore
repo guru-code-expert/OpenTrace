@@ -83,6 +83,7 @@ instance/
 docs/_build/
 
 # PyBuilder
+temp_auto_push.bat
 .pybuilder/
 target/
 
@@ -167,4 +168,5 @@ OAI_CONFIG_LIST
 *.gv.pdf
 
 # jupyter book API output
-docs/api/*
+docs/api/*.gitignore
+temp_interactive_push.bat
